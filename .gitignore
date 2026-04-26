@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pt
+*.safetensors
+data_raw/
+data_processed/
