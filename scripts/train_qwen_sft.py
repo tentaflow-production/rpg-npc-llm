@@ -3,10 +3,11 @@ from typing import Any
 
 import torch
 import yaml
-from datasets import load_from_disk
-from peft import LoraConfig, get_peft_model
-from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
-from trl import SFTTrainer
+from datasets import DatasetDict, load_from_disk
+from peft import LoraConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from trl.trainer.sft_config import SFTConfig
+from trl.trainer.sft_trainer import SFTTrainer
 
 
 def load_config(path: str) -> dict[str, Any]:
@@ -30,6 +31,8 @@ def main() -> None:
 
     print("Loading dataset...")
     ds = load_from_disk(data_cache)
+    if isinstance(ds, DatasetDict):
+        ds = ds["train"]
 
     print("Loading tokenizer & base model...")
     tokenizer = AutoTokenizer.from_pretrained(base_model)
@@ -50,10 +53,8 @@ def main() -> None:
         bias=l["bias"],
         task_type="CAUSAL_LM",
     )
-    model = get_peft_model(model, lora_config)
-    model.print_trainable_parameters()
 
-    training_args = TrainingArguments(
+    training_args = SFTConfig(
         output_dir=output_dir,
         per_device_train_batch_size=t["per_device_train_batch_size"],
         gradient_accumulation_steps=t["gradient_accumulation_steps"],
@@ -68,15 +69,16 @@ def main() -> None:
         save_total_limit=t["save_total_limit"],
         bf16=t["bf16"],
         report_to=t["report_to"],
+        dataset_text_field="text",
+        max_length=t["max_length"],
     )
 
     trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         train_dataset=ds,
-        dataset_text_field="text",
-        max_seq_length=t["max_seq_length"],
         args=training_args,
+        peft_config=lora_config,
     )
 
     trainer.train()

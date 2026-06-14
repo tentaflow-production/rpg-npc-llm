@@ -44,6 +44,7 @@ humanfriendly==10.0
 idna==3.11
 importlib_metadata==8.7.1
 importlib_resources==7.1.0
+iniconfig==2.3.0
 inquirerpy==0.3.4
 Jinja2==3.1.6
 joblib==1.5.3
@@ -106,6 +107,7 @@ peft==0.18.0
 pfzy==0.3.4
 pillow==11.3.0
 platformdirs==4.5.1
+pluggy==1.6.0
 prompt_toolkit==3.0.52
 propcache==0.4.1
 protobuf==6.33.2
@@ -118,6 +120,7 @@ pydantic_core==2.41.5
 Pygments==2.20.0
 PyPika==0.51.1
 pyproject_hooks==1.2.0
+pytest==9.1.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 pytorch-triton==3.6.0+git5261b273

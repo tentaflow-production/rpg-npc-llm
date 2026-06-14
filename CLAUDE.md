@@ -98,7 +98,7 @@ Before marking a task done, check:
 
 ## Session Log
 
-At the end of every session, append an entry to `DEVLOG.md` in the project root with this format:
+At the end of every session, append an entry to `devlog.md` in the project root with this format:
 
 ### YYYY-MM-DD
 **Built / Changed**
@@ -112,4 +112,4 @@ At the end of every session, append an entry to `DEVLOG.md` in the project root 
 
 ---
 
-Always append, never overwrite previous entries. If DEVLOG.md doesn't exist, create it.
+Always append, never overwrite previous entries. If devlog.md doesn't exist, create it.

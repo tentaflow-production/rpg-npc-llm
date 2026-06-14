@@ -28,13 +28,19 @@ training:
   learning_rate: 2e-4
   lr_scheduler_type: "cosine"
   warmup_ratio: 0.03
-  max_seq_length: 1024
+  max_length: 1024
   bf16: true
   save_strategy: "steps"
   save_steps: 200
   save_total_limit: 3
   logging_steps: 20
   report_to: "none"
+
+inference:
+  max_new_tokens: 200
+  temperature: 0.9
+  top_p: 0.9
+  default_system: "You are an NPC in a fantasy RPG."
 
 seed: 42
 date: "2026-04-26"
