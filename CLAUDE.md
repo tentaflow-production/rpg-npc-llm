@@ -19,13 +19,52 @@ You have full access to the project files. Always read CLAUDE.md first for proje
 - Use tqdm for progress bars
 - Type hints on all function signatures
 
-## File Conventions
-- Training scripts → scripts/
-- Config files → configs/ (YAML format)
-- Raw data → data_raw/
-- Processed data → data_processed/ (.jsonl format)
-- Each experiment → ~/experiments/<name>_YYYY_MM_DD/
-- Never write model weights or large datasets into the git repo
+## Directory Layout
+
+### Workstation directories (outside the repo, never committed)
+| Path | Contents |
+|---|---|
+| `~/models/` | Local LLM weights (Qwen, Llama, etc.) |
+| `~/datasets/` | SFT and RL datasets, current and future |
+| `~/checkpoints/` | Training checkpoints, one subdir per run |
+| `~/experiments/` | Experiment snapshots, e.g. `qwen_sft_2025_12_06/` — each contains `config.yaml` and a pip-freeze snapshot |
+| `~/logs/` | Training logs, one subdir per run |
+| `~/scripts/` | Utility and setup scripts |
+
+### Repo directories (committed)
+| Path | Contents |
+|---|---|
+| `scripts/` | Training and preprocessing Python scripts |
+| `configs/` | YAML config files |
+
+### Standard path conventions for scripts
+```
+DATA_CACHE  = ~/datasets/rpg-npc-llm/<dataset_name>
+OUTPUT_DIR  = ~/checkpoints/<run_name>
+LOG_DIR     = ~/logs/<run_name>
+EXPERIMENT  = ~/experiments/<run_name>_YYYY_MM_DD/
+```
+
+The repo must never contain model weights, datasets, checkpoints, or logs.
+Processed data (`.jsonl`, Arrow caches) lives in `~/datasets/`, not in the repo.
+
+## When Making Changes
+
+Any change that touches a path, hyperparameter, or interface must be propagated to every file that references it. The dependency chain is:
+
+```
+configs/*.yaml   ← single source of truth for all values
+    ↓
+scripts/*.py     ← read from config, no hardcoded values
+    ↓
+claude.md        ← documents conventions and path layout
+```
+
+Before marking a task done, check:
+- If a path changed → update the config YAML, both scripts, and claude.md if it appears there
+- If a new hyperparameter was added → add it to the config YAML first, then read it in the script
+- If a script's interface changed (new arg, new output) → update claude.md to reflect it
+- Never leave a value hardcoded in a script if it already exists in the config
 
 ## When Writing Training Scripts
 - Always include: seed fixing, wandb logging, checkpoint saving, gradient checkpointing
@@ -56,3 +95,21 @@ You have full access to the project files. Always read CLAUDE.md first for proje
 - When editing existing files, show only the changed sections
 - Always verify file paths exist before writing
 - If a command might take >1 min, warn the user first
+
+## Session Log
+
+At the end of every session, append an entry to `devlog.md` in the project root with this format:
+
+### YYYY-MM-DD
+**Built / Changed**
+- <what was added or modified>
+
+**Key Decisions**
+- <any architectural or design choices made>
+
+**Next Steps**
+- <what to pick up next session>
+
+---
+
+Always append, never overwrite previous entries. If devlog.md doesn't exist, create it.

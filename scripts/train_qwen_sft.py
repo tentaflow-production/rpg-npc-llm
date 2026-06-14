@@ -1,78 +1,92 @@
+import argparse
+from typing import Any
+
 import torch
-from datasets import load_from_disk
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-    TrainingArguments,
-)
-from peft import LoraConfig, get_peft_model
-from trl import SFTTrainer
+import yaml
+from datasets import DatasetDict, load_from_disk
+from peft import LoraConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from trl.trainer.sft_config import SFTConfig
+from trl.trainer.sft_trainer import SFTTrainer
 
-BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
-DATA_CACHE = " /home/seabass1/projects/rpg-npc-llm/data_processed/npc_dialogues_tok"
-OUTPUT_DIR = " /home/seabass1/projects/rpg-npc-llm/models/qwen-npc-lora-v1"
-LOG_DIR = " /home/seabass1/projects/rpg-npc-llm/logs/qwen-npc-lora-v1"
 
-def main():
+def load_config(path: str) -> dict[str, Any]:
+    with open(path) as f:
+        return yaml.safe_load(f)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True, help="Path to YAML config file")
+    args = parser.parse_args()
+
+    cfg = load_config(args.config)
+    t   = cfg["training"]
+    l   = cfg["lora"]
+
+    base_model = cfg["model"]["base_model"]
+    data_cache = cfg["paths"]["data_cache"]
+    output_dir = cfg["paths"]["output_dir"]
+    log_dir    = cfg["paths"]["log_dir"]
+
     print("Loading dataset...")
-    ds = load_from_disk(DATA_CACHE)
+    ds = load_from_disk(data_cache)
+    if isinstance(ds, DatasetDict):
+        ds = ds["train"]
 
     print("Loading tokenizer & base model...")
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+    tokenizer = AutoTokenizer.from_pretrained(base_model)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     model = AutoModelForCausalLM.from_pretrained(
-        BASE_MODEL,
-        torch_dtype="auto",
+        base_model,
+        torch_dtype=torch.bfloat16,
         device_map="auto",
     )
 
-    # LoRA 配置（可以之后慢慢调）
     lora_config = LoraConfig(
-        r=16,
-        lora_alpha=32,
-        lora_dropout=0.05,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-        bias="none",
+        r=l["r"],
+        lora_alpha=l["alpha"],
+        lora_dropout=l["dropout"],
+        target_modules=l["target_modules"],
+        bias=l["bias"],
         task_type="CAUSAL_LM",
     )
-    model = get_peft_model(model, lora_config)
-    model.print_trainable_parameters()
 
-    training_args = TrainingArguments(
-        output_dir=OUTPUT_DIR,
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=16,
-        num_train_epochs=2,
-        learning_rate=2e-4,
-        lr_scheduler_type="cosine",
-        warmup_ratio=0.03,
-        logging_dir=LOG_DIR,
-        logging_steps=20,
-
-        save_strategy="steps",   # 关键：保存 checkpoint
-        save_steps=200,
-        save_total_limit=3,      # 最多保留 3 个 checkpoint
-        bf16=torch.cuda.is_bf16_supported(),
-        report_to="none",        # 先不开 wandb
+    training_args = SFTConfig(
+        output_dir=output_dir,
+        per_device_train_batch_size=t["per_device_train_batch_size"],
+        gradient_accumulation_steps=t["gradient_accumulation_steps"],
+        num_train_epochs=t["num_train_epochs"],
+        learning_rate=t["learning_rate"],
+        lr_scheduler_type=t["lr_scheduler_type"],
+        warmup_ratio=t["warmup_ratio"],
+        logging_dir=log_dir,
+        logging_steps=t["logging_steps"],
+        save_strategy=t["save_strategy"],
+        save_steps=t["save_steps"],
+        save_total_limit=t["save_total_limit"],
+        bf16=t["bf16"],
+        report_to=t["report_to"],
+        dataset_text_field="text",
+        max_length=t["max_length"],
     )
 
     trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         train_dataset=ds,
-        dataset_text_field="text",
-        max_seq_length=1024,
         args=training_args,
+        peft_config=lora_config,
     )
 
     trainer.train()
 
-    # 保存最终 LoRA + tokenizer
-    trainer.save_model(OUTPUT_DIR)
-    tokenizer.save_pretrained(OUTPUT_DIR)
-    print("Training done, model saved to", OUTPUT_DIR)
+    trainer.save_model(output_dir)
+    tokenizer.save_pretrained(output_dir)
+    print("Training done, model saved to", output_dir)
+
 
 if __name__ == "__main__":
     main()
