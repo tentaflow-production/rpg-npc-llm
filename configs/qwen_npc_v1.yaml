@@ -1,9 +1,15 @@
 model:
   base_model: "Qwen/Qwen2.5-7B-Instruct"
 
+run_name: "qwen-npc-lora-v1"
+experiment_dir: "/home/seabass1/experiments"   # snapshot dir = <experiment_dir>/<run_name>_<YYYY_MM_DD>
+
 paths:
-  data_file:  "/home/seabass1/datasets/rpg-npc-llm/npc_dialogues.jsonl"
-  data_cache: "/home/seabass1/datasets/rpg-npc-llm/npc_dialogues_tok"
+  # data_cache MUST point at a timestamped tokenized dir produced by
+  # prepare_dataset.py, e.g.
+  #   ~/datasets/rpg-npc-llm-dataset-pipeline/tokenized/dialogues_built_<YYYYmmdd_HHMMSS>/
+  # The timestamp changes every prepare_dataset run — paste the path it prints.
+  data_cache: "/home/seabass1/datasets/rpg-npc-llm-dataset-pipeline/tokenized/dialogues_built_REPLACE_ME"
   output_dir: "/home/seabass1/checkpoints/qwen-npc-lora-v1"
   log_dir:    "/home/seabass1/logs/qwen-npc-lora-v1"
 
@@ -25,16 +31,18 @@ training:
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 16
   num_train_epochs: 2
+  max_steps: -1                 # -1 ⇒ use num_train_epochs; a positive value overrides epochs
   learning_rate: 2e-4
   lr_scheduler_type: "cosine"
   warmup_ratio: 0.03
-  max_length: 1024
+  max_length: 1024              # used by prepare_dataset.py at tokenization time
   bf16: true
+  gradient_checkpointing: true
   save_strategy: "steps"
   save_steps: 200
   save_total_limit: 3
   logging_steps: 20
-  report_to: "none"
+  report_to: "wandb"            # run `wandb login` once; configs/smoke.yaml overrides to "none"
 
 inference:
   max_new_tokens: 200

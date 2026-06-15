@@ -2,6 +2,35 @@
 
 ---
 
+### 2026-06-14 — Training side: plain Trainer + smoke pipeline
+
+**Built / Changed**
+- Rewrote `scripts/train_qwen_sft.py`: dropped TRL `SFTTrainer`/`SFTConfig`; now a plain `transformers.Trainer` consuming the pre-tokenized `input_ids`/`attention_mask`/`labels` directly, with `DataCollatorForSeq2Seq(label_pad_token_id=-100)`, `device_map={"":0}`, LoRA + `enable_input_require_grads()` + `use_cache=False` (correct grad-ckpt order), an `NpcTrainer.compute_loss` pass-through seam (keeps `**kwargs` for `num_items_in_batch`), `set_seed`, graceful `KeyboardInterrupt` save, config+pip-freeze experiment snapshot, and always-on pre-flight checks (column guard, label sanity, advisory initial-loss read).
+- Factored pure helpers (`build_training_kwargs`, `experiment_snapshot_dir`, `take_first_n`, `assert_dataset_columns`) and covered them in `tests/test_train_qwen_sft.py` (14 offline tests; suite now 30 green).
+- Configs: fixed `qwen_npc_v1.yaml` (placeholder `data_cache` + comment, `report_to: wandb`, `gradient_checkpointing`, `run_name`, `experiment_dir`, `max_steps: -1`; dropped dead `data_file`); added `configs/smoke.yaml` (same model; 8 rows, 60 steps, grad-accum 1, grad-ckpt ON — with the two IMPORTANT comments).
+- Added `notebooks/smoke_test.ipynb` (one-off inspection: masking → collation → model+LoRA → initial-loss → overfit-to-0 → optional generate), reading everything from `smoke.yaml` and importing the real training helpers.
+- Added `docs/training.md` (architecture, the grad-ckpt gotcha, smoke vs actual, symptom→cause table) and linked it near the top of `README.md`; updated README training section + repo layout.
+- `.vscode`/tooling: added `pyrightconfig.json` (`extraPaths: ["scripts"]`); `.gitignore` += `.ipynb_checkpoints/`.
+- Installed (cleanly, dry-run-guarded, torch/numpy/transformers/triton untouched): `ipykernel`, `matplotlib` (pinned in `requirements.txt`); `basedpyright` + `nbconvert` as dev/CI tools (not pinned).
+
+**Verification**
+- basedpyright: 0 errors on touched files (`infer.py` has pre-existing errors — untouched, out of scope).
+- Tier 1: `pytest` 30 green; `train_qwen_sft.py --help` + `prepare_dataset.py --help` run.
+- Tier 2 (real GPU smoke, `configs/smoke.yaml`): pre-flight passed (375 supervised / 1673 masked), initial loss 3.49, trainable 0.527%, overfit 3.27 → 0.0005, snapshot + adapter saved.
+- Notebook executed headless (no cell errors); outputs cleared before commit.
+
+**Key Decisions**
+- `prepare_dataset` owns tokenization+masking; training only consumes it → plain `Trainer`, not `SFTTrainer`. `compute_loss` is a seam (keep `**kwargs`).
+- Smoke is "small" via subset+steps, never by swapping the model (the tokenized cache is tokenizer-specific). Grad-ckpt stays ON in smoke so it exercises the `enable_input_require_grads` path.
+- Type fixes by narrowing (`cast` to `PreTrainedModel`), never `# type: ignore`.
+- Notebooks are inspection-only; the training path is always a script (reconciled in CLAUDE.md).
+
+**Next Steps**
+- For a real run: re-run `prepare_dataset.py`, paste the printed tokenized path into `qwen_npc_v1.yaml` `data_cache`, `wandb login`, then `train_qwen_sft.py --config configs/qwen_npc_v1.yaml`.
+- Data lineage / manifest was out of scope this pass.
+
+---
+
 ### 2026-06-14
 
 **Built / Changed**

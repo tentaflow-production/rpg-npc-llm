@@ -1,0 +1,65 @@
+# Smoke / overfit config: validates the FULL training path fast.
+#
+# It differs from qwen_npc_v1.yaml ONLY in config values — SAME base model — and
+# shrinks the DATA (8 rows) and STEPS, never the model. The tokenized cache is
+# tokenizer-specific, so swapping in a smaller model would need its own cache and
+# risk a silent tokenizer/embedding mismatch. "Small" here = subset + few steps.
+
+model:
+  base_model: "Qwen/Qwen2.5-7B-Instruct"
+
+run_name: "qwen-npc-lora-smoke"
+experiment_dir: "/home/seabass1/experiments"
+
+paths:
+  # SAME tokenized cache as the real run — paste the path prepare_dataset.py printed.
+  data_cache: "/home/seabass1/datasets/rpg-npc-llm-dataset-pipeline/tokenized/dialogues_built_20260614_175358"
+  output_dir: "/home/seabass1/checkpoints/qwen-npc-lora-smoke"
+  log_dir:    "/home/seabass1/logs/qwen-npc-lora-smoke"
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+  bias: "none"
+
+training:
+  subset_size: 8                  # overfit the first 8 rows only
+  max_steps: 60                   # overrides num_train_epochs
+  num_train_epochs: 1             # unused while max_steps > 0, but a required field
+  per_device_train_batch_size: 2
+  # IMPORTANT: 1 ⇒ every step is one optimizer update — a clean, fast overfit
+  # signal with no gradient-accumulation smoothing. Do not raise this for smoke.
+  gradient_accumulation_steps: 1
+  learning_rate: 2e-4
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.03
+  max_length: 1024
+  bf16: true
+  # IMPORTANT: keep gradient checkpointing ON so smoke EXERCISES the
+  # enable_input_require_grads path. Turning it OFF would make smoke pass while
+  # real training (which keeps it on) silently fails to train the LoRA adapter.
+  gradient_checkpointing: true
+  save_strategy: "no"             # throwaway run; no intermediate checkpoints
+  save_steps: 200
+  save_total_limit: 1
+  logging_steps: 1                # log every step so the overfit curve is visible
+  report_to: "none"              # no wandb for smoke (avoids a login-prompt hang)
+
+inference:
+  max_new_tokens: 80
+  temperature: 0.7
+  top_p: 0.9
+  default_system: "You are an NPC in a fantasy RPG."
+
+seed: 42
+date: "2026-06-14"
+notes: "Smoke/overfit config — validates the training pipeline on 8 rows in ~60 steps."
