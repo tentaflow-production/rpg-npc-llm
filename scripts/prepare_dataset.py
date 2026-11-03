@@ -54,8 +54,8 @@ class SupportsChatTemplate(Protocol):
         conversation: Any,
         /,
         *,
-        tokenize: bool = ...,
-        add_generation_prompt: bool = ...,
+        tokenize: bool = True,
+        add_generation_prompt: bool = False,
         **kwargs: Any,
     ) -> Any: ...
 
