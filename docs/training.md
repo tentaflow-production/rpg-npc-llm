@@ -6,7 +6,7 @@ There are two modes:
 
 | Mode | What | When | Saves anything? |
 |---|---|---|---|
-| **Smoke** | `notebooks/smoke_test.ipynb` (first time) → then `scripts/train_qwen_sft.py --config configs/smoke.yaml` | Validate the pipeline end to end before a real run, or after changing the training code | No — throwaway dirs |
+| **Smoke** | `scripts/train_qwen_sft.py --config configs/smoke.yaml` | Validate the pipeline end to end before a real run, or after changing the training code | No — throwaway dirs |
 | **Actual** | `scripts/train_qwen_sft.py --config configs/qwen_npc_v1.yaml` | The real training run | Yes — checkpoints + an experiment snapshot, logged to wandb |
 
 Smoke proves the *plumbing* (masking → collation → LoRA → loss goes down). Actual is the reproducible run you keep.
@@ -49,25 +49,23 @@ Smoke proves the *plumbing* (masking → collation → LoRA → loss goes down).
 
 The smoke run is "small" via an **8-row subset + ~60 steps**, *not* by swapping models — it uses the same `Qwen2.5-7B-Instruct` as the real run, because the tokenized cache is tokenizer-specific (a smaller model would need its own cache and risks a silent tokenizer/embedding mismatch). Everything is config-only via `configs/smoke.yaml`.
 
-### First time: the notebook (`notebooks/smoke_test.ipynb`)
+### What a healthy smoke shows
 
-Walk the five steps and confirm each looks healthy:
+The script runs these checks headless (pre-flight checks below, then the overfit); `tests/test_prepare_dataset.py` covers masking offline. Read the output against:
 
 1. **Masking (no GPU).** Decode the tokens where `label != -100` for one row — it should read as the **NPC's reply**, not the system persona or the player's line. Supervised fraction strictly between 0 and 1.
 2. **Collation (no GPU).** Collate two rows; all three tensors share a shape; the shorter row's padded label tail is all `-100`.
 3. **Model + LoRA (GPU, loads the 7B — >1 min).** Trainable params print ~0.05%–2%. One forward gives an initial-loss read (see magnitude guide below).
 4. *(covered within step 3 — the initial-loss read)*
-5. **Overfit (GPU).** Train the first 8 rows for ~60 steps with checkpointing ON; the loss curve should fall toward ~0. Flat loss ⇒ suspect the missing `enable_input_require_grads`.
+5. **Overfit (GPU).** Train the first 8 rows for ~60 steps with checkpointing ON; the loss curve should fall toward ~0 (final loss < 0.5). Flat loss ⇒ suspect the missing `enable_input_require_grads`.
 
-> The notebook is one-off inspection scaffolding. The training path is always the script.
-
-### Then: the script
+### Running it
 
 ```bash
 python scripts/train_qwen_sft.py --config configs/smoke.yaml
 ```
 
-This runs the same path headless, including the always-on pre-flight checks (below), and overfits the 8 rows. Throwaway output (`*_smoke` dirs); nothing to keep.
+This runs the full path, including the always-on pre-flight checks (below), and overfits the 8 rows. Throwaway output (`*_smoke` dirs); nothing to keep.
 
 ---
 
@@ -109,13 +107,13 @@ Every invocation of the script runs three cheap checks before training (they fai
 
 ## How to view loss & health metrics
 
-| Signal | Smoke (notebook / script) | Actual (script + wandb) |
+| Signal | Smoke (script) | Actual (script + wandb) |
 |---|---|---|
-| **Loss curve** | `trainer.state.log_history` → plotted in the notebook; printed each step in the script | wandb run page (live) |
-| **Initial-loss read** | printed by pre-flight (c) / notebook Step 3 | printed by pre-flight (c) at run start |
-| **Trainable params %** | `print_trainable_parameters()` in notebook Step 3 / script | printed at run start |
-| **Supervised-token fraction** | notebook Step 1 | (validated once via smoke) |
-| **Overfit-to-0** | notebook Step 5 asserts final loss near 0 | n/a (real data shouldn't hit 0) |
+| **Loss curve** | printed each step (`logging_steps: 1`) | wandb run page (live) |
+| **Initial-loss read** | printed by pre-flight (c) | printed by pre-flight (c) at run start |
+| **Trainable params %** | `print_trainable_parameters()` at run start | printed at run start |
+| **Supervised-token fraction** | pre-flight (b) label check; `tests/test_prepare_dataset.py` | (validated once via smoke) |
+| **Overfit-to-0** | read the last printed loss (< 0.5) | n/a (real data shouldn't hit 0) |
 
 **Healthy reads:**
 - **Initial loss ≈ 1–3.** Near `ln(vocab) ≈ 11.6` ⇒ likely label misalignment. `0` or `NaN` ⇒ a real problem.
@@ -143,5 +141,4 @@ Every invocation of the script runs three cheap checks before training (they fai
 | [`scripts/train_qwen_sft.py`](../scripts/train_qwen_sft.py) | Consumes the cache; plain `Trainer` + LoRA; the `compute_loss` seam |
 | [`configs/qwen_npc_v1.yaml`](../configs/qwen_npc_v1.yaml) | The real run |
 | [`configs/smoke.yaml`](../configs/smoke.yaml) | Smoke: same model, shrunk data + steps |
-| [`notebooks/smoke_test.ipynb`](../notebooks/smoke_test.ipynb) | One-off step-by-step validation |
 | [`tests/test_train_qwen_sft.py`](../tests/test_train_qwen_sft.py) | Offline unit tests for the training logic |

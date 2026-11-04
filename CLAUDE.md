@@ -12,9 +12,8 @@ You have full access to the project files. Always read CLAUDE.md first for proje
 - Python path: check with `which python` — must show conda llm env path
 
 ## Code Style
-- Python only for training scripts — the training path is always a script.
-  Notebooks are permitted for one-off inspection/validation only (e.g.
-  `notebooks/smoke_test.ipynb`); never as the training path.
+- Python scripts only — no notebooks. The training path is always a script;
+  smoke validation is `scripts/train_qwen_sft.py --config configs/smoke.yaml`.
 - Use argparse or yaml config files for all hyperparameters — no hardcoded values
 - Every training script must accept `--config` argument pointing to a YAML file
 - Add logging to ~/logs/ for every script run

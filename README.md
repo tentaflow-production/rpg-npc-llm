@@ -45,7 +45,6 @@ Inside the repo (committed):
 | `scripts/` | Training and preprocessing scripts (`prepare_dataset.py`, `train_qwen_sft.py`, `infer.py`) |
 | `configs/` | YAML config files — the single source of truth for paths and hyperparameters (`qwen_npc_v1.yaml`, `smoke.yaml`) |
 | `tests/` | Unit tests (`unittest`, runnable under `pytest`) |
-| `notebooks/` | One-off inspection/validation only (`smoke_test.ipynb`) — never the training path |
 | `docs/` | Project docs (`training.md`) |
 
 ---
@@ -93,7 +92,7 @@ freeze) is written to `~/experiments/<run_name>_<date>/`. Training time is
 roughly 30–60 min per epoch on an RTX 5090 for a small dataset.
 
 **Validate the pipeline first** with the smoke run (same model, 8 rows, ~60
-steps) — walk `notebooks/smoke_test.ipynb`, then:
+steps):
 
 ```bash
 python scripts/train_qwen_sft.py --config configs/smoke.yaml
