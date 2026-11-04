@@ -12,7 +12,9 @@ You have full access to the project files. Always read CLAUDE.md first for proje
 - Python path: check with `which python` — must show conda llm env path
 
 ## Code Style
-- Python only (no notebooks for training scripts)
+- Python only for training scripts — the training path is always a script.
+  Notebooks are permitted for one-off inspection/validation only (e.g.
+  `notebooks/smoke_test.ipynb`); never as the training path.
 - Use argparse or yaml config files for all hyperparameters — no hardcoded values
 - Every training script must accept `--config` argument pointing to a YAML file
 - Add logging to ~/logs/ for every script run
@@ -71,6 +73,30 @@ Before marking a task done, check:
 - Default batch size should account for 32GB VRAM — suggest 4-8 for 7B models with LoRA
 - Always save config.yaml snapshot into the experiment directory at run start
 - Handle keyboard interrupt gracefully (save checkpoint before exit)
+
+## Training Architecture (decision — 2026-06-14)
+
+See `docs/training.md` for the full rationale. The core decisions:
+
+- **`prepare_dataset.py` owns tokenization AND assistant-only label masking.** It
+  emits an Arrow dataset of `input_ids` / `attention_mask` / `labels`. The
+  training side only **consumes** these — it never tokenizes or masks.
+- **`train_qwen_sft.py` uses a plain `transformers.Trainer`, NOT TRL's
+  `SFTTrainer`.** SFTTrainer tokenizes/masks itself, which would conflict with
+  our already-masked labels (and its label-preservation is version-dependent in
+  trl 0.25.1). Loss is then exactly cross-entropy on the labels we unit-tested.
+- **`NpcTrainer.compute_loss` is a pass-through seam** for future loss terms. Its
+  `**kwargs` must stay — it forwards `num_items_in_batch`, required for correct
+  gradient-accumulation loss.
+- **`DataCollatorForSeq2Seq(..., label_pad_token_id=-100)` is required** (the
+  default collator does not pad labels); do not pass `model=` to it.
+- **Gradient checkpointing needs `enable_input_require_grads()`** after
+  `get_peft_model`, plus `use_cache=False`, or grads never reach LoRA (flat loss).
+- **Single-GPU training uses `device_map={"": 0}`**, NOT inference's
+  `device_map="auto"` (which can offload to CPU and breaks Trainer device control).
+- **Two modes:** smoke (`configs/smoke.yaml` — same model, 8 rows + ~60 steps,
+  throwaway) validates the pipeline; actual (`configs/qwen_npc_v1.yaml` — wandb +
+  checkpoints + experiment snapshot) is the real run.
 
 ## When Writing RAG Code
 - Vector store: ChromaDB (already installed)

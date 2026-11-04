@@ -10,6 +10,8 @@ Qwen2.5-7B-Instruct (base)
             └── RL (DPO / PPO)  — in-character behaviour and preference alignment
 ```
 
+📖 **Training details, architecture, and health metrics:** see [docs/training.md](docs/training.md).
+
 ---
 
 ## Requirements
@@ -41,8 +43,10 @@ Inside the repo (committed):
 | Path | Contents |
 |---|---|
 | `scripts/` | Training and preprocessing scripts (`prepare_dataset.py`, `train_qwen_sft.py`, `infer.py`) |
-| `configs/` | YAML config files — the single source of truth for paths and hyperparameters |
+| `configs/` | YAML config files — the single source of truth for paths and hyperparameters (`qwen_npc_v1.yaml`, `smoke.yaml`) |
 | `tests/` | Unit tests (`unittest`, runnable under `pytest`) |
+| `notebooks/` | One-off inspection/validation only (`smoke_test.ipynb`) — never the training path |
+| `docs/` | Project docs (`training.md`) |
 
 ---
 
@@ -73,13 +77,30 @@ Override either with `--input` / `--output`.
 
 ### Step 2 — Train
 
-Loads the Arrow cache, attaches LoRA adapters to the base model, and runs SFT training. Checkpoints are saved every 200 steps; the final adapter is written to `~/checkpoints/qwen-npc-lora-v1/`.
+Loads the **pre-tokenized** Arrow cache and trains a LoRA adapter with a plain
+`transformers.Trainer` — tokenization and label masking are already done by
+`prepare_dataset.py`, so the training side just consumes `input_ids` /
+`attention_mask` / `labels` directly (no `SFTTrainer`). First paste the tokenized
+path from Step 1 into `paths.data_cache`, then:
 
 ```bash
 python scripts/train_qwen_sft.py --config configs/qwen_npc_v1.yaml
 ```
 
-Training time is roughly 30–60 min per epoch on an RTX 5090 for a small dataset.
+Checkpoints save every `save_steps` to `~/checkpoints/qwen-npc-lora-v1/`, loss
+goes to wandb (`wandb login` once), and an experiment snapshot (config + pip
+freeze) is written to `~/experiments/<run_name>_<date>/`. Training time is
+roughly 30–60 min per epoch on an RTX 5090 for a small dataset.
+
+**Validate the pipeline first** with the smoke run (same model, 8 rows, ~60
+steps) — walk `notebooks/smoke_test.ipynb`, then:
+
+```bash
+python scripts/train_qwen_sft.py --config configs/smoke.yaml
+```
+
+See [docs/training.md](docs/training.md) for the architecture, the
+gradient-checkpointing gotcha, and how to read the health metrics.
 
 ### Creating a new experiment config
 
