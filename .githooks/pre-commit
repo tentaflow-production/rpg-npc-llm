@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Blocks weights, datasets, .env files and anything larger than 5 MB from being committed.
+# Enable with: git config core.hooksPath .githooks   (the nightly runner does this).
+set -u
+MAX_BYTES=$((5 * 1024 * 1024))
+bad=0
+while IFS= read -r -d '' f; do
+  case "$f" in
+    *.safetensors|*.pt|*.pth|*.bin|*.gguf|*.jsonl|*.parquet|*.arrow|.env|.env.*|*/.env|*/.env.*)
+      echo "pre-commit: refusing to commit '$f' (weights / dataset / secret file type)" >&2
+      bad=1
+      continue
+      ;;
+  esac
+  size=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
+  if [ "$size" -gt "$MAX_BYTES" ]; then
+    echo "pre-commit: refusing to commit '$f' ($size bytes > 5 MB)" >&2
+    bad=1
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+exit "$bad"

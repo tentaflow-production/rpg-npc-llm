@@ -1,5 +1,17 @@
 .venv/
 __pycache__/
-*.pt
-*.safetensors
+.pytest_cache/
+.ruff_cache/
 .ipynb_checkpoints/
+
+# Never commit weights, datasets, secrets (also enforced by .githooks/pre-commit)
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.gguf
+*.jsonl
+*.parquet
+*.arrow
+.env
+.env.*
