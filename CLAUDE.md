@@ -138,3 +138,25 @@ At the end of every session, append an entry to `devlog.md` in the project root 
 ---
 
 Always append, never overwrite previous entries. If devlog.md doesn't exist, create it.
+
+---
+
+## Supervisor-managed rules (merged from the supervisor's target-repo-CLAUDE.md)
+
+- `main` is protected. Work on the `feat/<item-id>-<slug>` branch the runner checked out. Never push (the runner pushes), never force-push, never change remotes or config.
+- Commit format `<type>: <summary>` (`feat|fix|data|config|refactor|docs|test|chore`), body references the roadmap item id.
+- Never commit weights (`*.safetensors`, `*.pt`, `*.bin`), datasets (`*.jsonl`, `*.parquet`, `*.arrow`), `.env`, or files > 5 MB. `.githooks/pre-commit` enforces this; `core.hooksPath` is set by the runner.
+- `scripts/regression.sh` holds every merged item's `done-when` commands; CI runs it. Never edit a line you did not add in your own item.
+- Python 3.10, conda env `llm`. Never install/upgrade torch, transformers, peft, trl, accelerate, bitsandbytes. New pure-Python deps: add to `pyproject.toml`/`requirements.txt` and ask in `QUESTIONS.md`; nightly runs cannot install.
+- All training bf16. One RTX 5090 (32 GB, sm_120). Long GPU work only via the supervisor's `scripts/job_dispatch.sh`.
+- Paths come from environment variables (`MODELS_DIR`, `DATASETS_DIR`, `CHECKPOINTS_DIR`, `EXPERIMENTS_DIR`, `LOGS_DIR`, `LOCAL_LLM_URL`) with defaults under `~/`. No hard-coded `/home/<user>/`.
+- In the **build** phase `tests/**` and the item's oracle files are frozen. If a frozen test is wrong, say so in the handoff and stop; do not work around it.
+- Canon (world, plot, characters) is read-only in `$SUPERVISOR_REPO/docs/canon/`. Anything not in canon is marked `[inferred]`; a source conflict is implemented per 04's conflict table and tagged `[conflict Q3-Cn]`.
+
+## Repo-specific: $ML_REPO (`rpg-npc-llm`)
+
+- Layout: `scripts/` (entry points taking `--config <frozen yaml> --job-dir <dir>`), `src/rpgnpc/` (library code), `data/` (small committed data: eval sets + `.sha256`, templates, `secrets.yaml`, `DATASET_CARD.md`), `tests/`, `experiments/` (only `smoke.yaml` and `LEDGER.md` committed; real runs live in `$EXPERIMENTS_DIR`).
+- Every experiment/job directory follows `$SUPERVISOR_REPO/experiments/PROTOCOL.md`; a job reads `config.launched.yaml` (frozen) and writes `results.json`/`eval.json`/`done.json`; never writes back into a config.
+- Seeds fixed; dependency versions, git SHA, config hash, dataset hashes and model-weights hash written into `results.json`.
+- `report_to: tensorboard`; `WANDB_MODE=disabled`; `HF_HUB_OFFLINE=1` in unattended runs.
+- Trainer (M0): `scripts/train_qwen_sft.py --config <yaml> --job-dir <dir> [--dry-run [--resume-test]] [--allow-sha-change]`. The config schema is the supervisor's `experiments/config.template.yaml`, with `data.tokenized_dir` (output of `prepare_dataset.py`) in place of `data.train`. It refuses a dirty tree, writes `metrics.csv` (the trainer uses `report_to: none`) and writes `results.json` only on success. `configs/*.yaml` use the older schema and are superseded by `experiments/smoke.yaml`.
