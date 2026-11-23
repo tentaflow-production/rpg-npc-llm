@@ -1,191 +1,400 @@
-"""Train a LoRA adapter on the PRE-TOKENIZED NPC dialogue dataset.
+"""Train a LoRA adapter on the PRE-TOKENIZED NPC dialogue dataset, unattended.
 
 Architectural decision (see docs/training.md and CLAUDE.md):
-  Tokenization AND assistant-only label masking are owned entirely by
-  scripts/prepare_dataset.py. This script merely CONSUMES the
-  input_ids / attention_mask / labels it already computed. We therefore use a
-  plain transformers.Trainer — NOT TRL's SFTTrainer, which is built to tokenize
-  and mask itself and would conflict with our already-masked labels. Loss here
-  is exactly cross-entropy on the labels we unit-tested — no in-library
-  preprocessing black box.
+  Tokenization AND assistant-only (completion-only) label masking are owned by
+  scripts/prepare_dataset.py. This script CONSUMES the input_ids /
+  attention_mask / labels it computed, with a plain transformers.Trainer — NOT
+  TRL's SFTTrainer. Loss is exactly cross-entropy on the masked labels.
 
-I/O:
-  --config  YAML config (default: configs/qwen_npc_v1.yaml). Supplies the base
-            model, LoRA config, training hyperparameters, and paths. Crucially,
-            paths.data_cache must point at a timestamped tokenized dir produced
-            by prepare_dataset.py.
+Contract (experiments/PROTOCOL.md in the supervisor repo):
+  --config   the FROZEN launched config (schema: experiments/config.template.yaml
+             of the supervisor; every training value is explicit; ${VAR} is the
+             only templating). Never written back to.
+  --job-dir  $EXPERIMENTS_DIR/<exp>/ : receives metrics.csv, pip_freeze.txt,
+             attempt markers and, ONLY on success, results.json.
 
 Usage:
-    python scripts/train_qwen_sft.py [--config configs/qwen_npc_v1.yaml]
-    python scripts/train_qwen_sft.py --config configs/smoke.yaml   # fast overfit
+    python scripts/train_qwen_sft.py --config experiments/smoke.yaml --job-dir DIR --dry-run
+    python scripts/train_qwen_sft.py --config experiments/smoke.yaml --job-dir DIR --dry-run --resume-test
 """
 
+from __future__ import annotations
+
 import argparse
+import csv
+import hashlib
+import json
+import os
+import re
 import shutil
 import subprocess
 import sys
-from datetime import datetime
+import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-import torch
-import yaml
-from datasets import Dataset, DatasetDict, load_from_disk
-from peft import LoraConfig, get_peft_model
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    DataCollatorForSeq2Seq,
-    PreTrainedModel,
-    Trainer,
-    TrainingArguments,
-    set_seed,
-)
-
-DEFAULT_CONFIG = str(Path(__file__).resolve().parent.parent / "configs" / "qwen_npc_v1.yaml")
-
+REPO_ROOT = Path(__file__).resolve().parent.parent
 IGNORE_INDEX = -100
 REQUIRED_COLUMNS = {"input_ids", "attention_mask", "labels"}
+LOSS_WINDOW = 10  # train_loss_final = mean of the last 10 logged training-loss values
+DRY_RUN_STEPS = 5  # [inferred] roadmap: "5 steps"
+RESUME_TEST_STEPS = 7  # [inferred] --resume-test resumes the 5-step dry run and trains 2 more steps
+CKPT_SHA_FILE = "git_sha.txt"  # written into every checkpoint dir: the HEAD that saved it
+DRY_CKPT = "dry_run_ckpt"
+STARTED_MARKER = "trainer_started"
 
-
-def load_config(path: str) -> dict[str, Any]:
-    with open(path) as f:
-        return yaml.safe_load(f)
+REQUIRED_KEYS: dict[str, list[str]] = {
+    "": ["exp_name", "seed", "data_seed", "model", "data", "lora", "train"],
+    "model": ["base", "dtype", "attn_implementation", "gradient_checkpointing"],
+    "data": ["tokenized_dir", "val_fraction", "max_length", "dry_run_examples"],
+    "lora": ["r", "alpha", "dropout", "target_modules", "bias", "task_type"],
+    "train": [
+        "epochs", "per_device_batch", "grad_accum", "lr", "scheduler", "warmup_ratio", "optim",
+        "weight_decay", "max_grad_norm", "logging_steps", "eval_strategy", "save_strategy",
+        "save_total_limit", "load_best_model_at_end", "metric_for_best_model",
+        "resume_from_checkpoint", "report_to", "output_dir",
+    ],
+}
 
 
 # --------------------------------------------------------------------------- #
-# Pure, offline-unit-testable helpers (no heavy objects, no GPU, no downloads) #
+# Config                                                                       #
 # --------------------------------------------------------------------------- #
 
 
-def build_training_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
-    """Map a loaded config dict to transformers.TrainingArguments kwargs.
-
-    Pure function (returns a plain dict) so it can be asserted in unit tests
-    without constructing a TrainingArguments object. max_steps defaults to -1
-    (TrainingArguments' "ignore me, use epochs" sentinel); a positive max_steps
-    in the config overrides num_train_epochs.
-    """
-    t = cfg["training"]
-    paths = cfg["paths"]
+def env_defaults() -> dict[str, str]:
+    home = Path.home()
     return {
-        "output_dir": paths["output_dir"],
-        "logging_dir": paths["log_dir"],
-        "per_device_train_batch_size": t["per_device_train_batch_size"],
-        "gradient_accumulation_steps": t["gradient_accumulation_steps"],
-        "num_train_epochs": t["num_train_epochs"],
-        "max_steps": t.get("max_steps", -1),
-        "learning_rate": float(t["learning_rate"]),
-        "lr_scheduler_type": t["lr_scheduler_type"],
-        "warmup_ratio": t["warmup_ratio"],
-        "logging_steps": t["logging_steps"],
-        "save_strategy": t["save_strategy"],
-        "save_steps": t["save_steps"],
-        "save_total_limit": t["save_total_limit"],
-        "bf16": t["bf16"],
-        # Gradient checkpointing: enable via TrainingArguments only (do NOT also
-        # call model.gradient_checkpointing_enable() — double-enabling is a known
-        # footgun). use_reentrant=False is the supported path for PEFT + ckpt.
-        "gradient_checkpointing": t.get("gradient_checkpointing", True),
-        "gradient_checkpointing_kwargs": {"use_reentrant": False},
-        "report_to": t.get("report_to", "none"),
-        "run_name": cfg.get("run_name"),
-        # We feed pre-tokenized columns straight through the collator; Trainer
-        # must NOT drop input_ids/labels as "unused".
-        "remove_unused_columns": False,
+        "ML_REPO": str(REPO_ROOT),
+        "MODELS_DIR": str(home / "models"),
+        "DATASETS_DIR": str(home / "datasets"),
+        "CHECKPOINTS_DIR": str(home / "checkpoints"),
+        "EXPERIMENTS_DIR": str(home / "experiments"),
+        "LOGS_DIR": str(home / "logs"),
     }
 
 
-def experiment_snapshot_dir(experiment_root: str, run_name: str, date_str: str) -> Path:
-    """~/experiments/<run_name>_<YYYY_MM_DD>/ — per CLAUDE.md reproducibility rule."""
-    return Path(experiment_root) / f"{run_name}_{date_str}"
+_VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
-def take_first_n(dataset: Dataset, subset_size: Any) -> Dataset:
-    """Return the first `subset_size` rows when it's a positive int, else the
-    whole dataset. Used for the config-driven smoke/overfit subset."""
-    if isinstance(subset_size, int) and subset_size > 0:
-        return dataset.select(range(min(subset_size, len(dataset))))
-    return dataset
+def expand_env(obj: Any, env: dict[str, str] | None = None) -> Any:
+    """Expand ${VAR} in every string of a nested structure. Nothing else is templated.
+
+    Lookup order: the config's own top-level scalars are NOT consulted here; callers
+    pass `env` (os.environ + defaults). `${exp_name}` is handled by the caller via env.
+    """
+    env = env if env is not None else {**env_defaults(), **os.environ}
+
+    def sub(s: str) -> str:
+        def rep(m: re.Match[str]) -> str:
+            if m.group(1) not in env:
+                raise KeyError(f"config refers to ${{{m.group(1)}}} but it is not set")
+            return env[m.group(1)]
+
+        return _VAR.sub(rep, s)
+
+    if isinstance(obj, str):
+        return sub(obj)
+    if isinstance(obj, list):
+        return [expand_env(v, env) for v in obj]
+    if isinstance(obj, dict):
+        return {k: expand_env(v, env) for k, v in obj.items()}
+    return obj
 
 
-def assert_dataset_columns(dataset: Dataset) -> None:
-    """Pre-flight (a): the tokenized cache must have exactly the three columns
-    a plain Trainer + DataCollatorForSeq2Seq consumes — nothing more, nothing
-    less. A stray 'text'/'messages' column means the wrong cache was passed."""
+def validate_config(cfg: dict[str, Any]) -> None:
+    """Every training value must be explicit; refuse a config that relies on defaults."""
+    for section, keys in REQUIRED_KEYS.items():
+        node = cfg if section == "" else cfg.get(section)
+        if not isinstance(node, dict):
+            raise TypeError(f"config section '{section}' is missing")
+        missing = [k for k in keys if k not in node]
+        if missing:
+            raise ValueError(f"config{'.' + section if section else ''} is missing: {missing}")
+    if str(cfg["model"]["dtype"]) != "bf16":
+        raise ValueError("model.dtype must be bf16 (PROTOCOL: bf16 only)")
+    t = cfg["train"]
+    if t["load_best_model_at_end"] and t["eval_strategy"] != t["save_strategy"]:
+        raise ValueError("eval_strategy must equal save_strategy when load_best_model_at_end is true")
+    if t["resume_from_checkpoint"] not in ("auto", "none"):
+        raise ValueError("train.resume_from_checkpoint must be 'auto' or 'none'")
+    if not 0 < float(cfg["data"]["val_fraction"]) < 1:
+        raise ValueError("data.val_fraction must be in (0, 1)")
+
+
+def load_config(path: str | Path) -> dict[str, Any]:
+    import yaml
+
+    raw = yaml.safe_load(Path(path).read_text())
+    env = {**env_defaults(), **os.environ}
+    if "exp_name" in raw:
+        env["exp_name"] = str(raw["exp_name"])
+    cfg = expand_env(raw, env)
+    validate_config(cfg)
+    return cfg
+
+
+# --------------------------------------------------------------------------- #
+# Pure helpers (offline-testable)                                              #
+# --------------------------------------------------------------------------- #
+
+
+def build_training_kwargs(
+    cfg: dict[str, Any],
+    output_dir: str,
+    logging_dir: str,
+    *,
+    dry_run: bool = False,
+    max_steps: int = -1,
+) -> dict[str, Any]:
+    """Map the config to transformers.TrainingArguments kwargs (plain dict, no objects).
+
+    Dry run: eval/save become `steps` with equal step counts (HF requires equality with
+    load_best_model_at_end), and max_steps is set by the caller.
+    """
+    t = cfg["train"]
+    kw: dict[str, Any] = {
+        "output_dir": output_dir,
+        "logging_dir": logging_dir,
+        "per_device_train_batch_size": t["per_device_batch"],
+        "per_device_eval_batch_size": t["per_device_batch"],
+        "gradient_accumulation_steps": t["grad_accum"],
+        "num_train_epochs": t["epochs"],
+        "max_steps": max_steps,
+        "learning_rate": float(t["lr"]),
+        "lr_scheduler_type": t["scheduler"],
+        "warmup_ratio": float(t["warmup_ratio"]),
+        "optim": t["optim"],
+        "weight_decay": float(t["weight_decay"]),
+        "max_grad_norm": float(t["max_grad_norm"]),
+        "logging_steps": t["logging_steps"],
+        "eval_strategy": t["eval_strategy"],
+        "save_strategy": t["save_strategy"],
+        "save_total_limit": t["save_total_limit"],
+        "load_best_model_at_end": bool(t["load_best_model_at_end"]),
+        "metric_for_best_model": t["metric_for_best_model"],
+        "greater_is_better": False,
+        "bf16": True,
+        "seed": cfg["seed"],
+        "data_seed": cfg["data_seed"],
+        # enable via TrainingArguments only (never also model.gradient_checkpointing_enable())
+        "gradient_checkpointing": bool(cfg["model"]["gradient_checkpointing"]),
+        "gradient_checkpointing_kwargs": {"use_reentrant": False},
+        "report_to": t["report_to"],
+        "run_name": cfg["exp_name"],
+        "remove_unused_columns": False,  # pre-tokenized columns must survive
+    }
+    if dry_run:
+        kw.update(
+            eval_strategy="steps", save_strategy="steps", eval_steps=DRY_RUN_STEPS,
+            save_steps=DRY_RUN_STEPS, logging_steps=1,
+        )
+    return kw
+
+
+def resolve_tokenized_dir(path: str) -> str:
+    """`path` is a tokenized dataset, or a parent holding dialogues_built_* (newest wins)."""
+    p = Path(path)
+    if (p / "dataset_info.json").exists() or (p / "dataset_dict.json").exists():
+        return str(p)
+    cands = sorted(c for c in p.glob("dialogues_built_*") if c.is_dir()) if p.is_dir() else []
+    if not cands:
+        raise FileNotFoundError(f"no tokenized dataset at or under {path}")
+    return str(cands[-1])
+
+
+def assert_dataset_columns(dataset: Any) -> None:
     cols = set(dataset.column_names)
     if cols != REQUIRED_COLUMNS:
         raise ValueError(
-            f"Tokenized dataset must have columns {sorted(REQUIRED_COLUMNS)}, "
-            f"got {sorted(cols)}. Point paths.data_cache at a dir produced by "
-            f"prepare_dataset.py."
+            f"Tokenized dataset must have columns {sorted(REQUIRED_COLUMNS)}, got {sorted(cols)}."
         )
 
 
-# --------------------------------------------------------------------------- #
-# Trainer with a compute_loss seam                                            #
-# --------------------------------------------------------------------------- #
+def assert_max_length(dataset: Any, max_length: int) -> None:
+    longest = max((len(x) for x in dataset["input_ids"]), default=0)
+    if longest > max_length:
+        raise ValueError(f"a row has {longest} tokens, over data.max_length={max_length}")
 
 
-class NpcTrainer(Trainer):
-    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-        # SEAM: add custom loss terms here later (e.g. RL/preference shaping).
-        # Pass-through for now. **kwargs forwards num_items_in_batch, which newer
-        # transformers passes to scale loss correctly under gradient
-        # accumulation — dropping it makes the loss WRONG.
-        return super().compute_loss(
-            model, inputs, return_outputs=return_outputs, **kwargs
+def take_first_n(dataset: Any, n: int | None) -> Any:
+    if isinstance(n, int) and n > 0:
+        return dataset.select(range(min(n, len(dataset))))
+    return dataset
+
+
+def split_train_val(dataset: Any, val_fraction: float, data_seed: int) -> tuple[Any, Any]:
+    """Cut a validation split FROM train (never from data.eval). At least one val row."""
+    n_val = max(1, round(len(dataset) * val_fraction))
+    if n_val >= len(dataset):
+        raise ValueError("dataset too small for a train/val split")
+    parts = dataset.train_test_split(test_size=n_val, seed=data_seed, shuffle=True)
+    return parts["train"], parts["test"]
+
+
+def dataset_hash(dataset: Any) -> str:
+    h = hashlib.sha256()
+    for col in ("input_ids", "labels"):
+        for row in dataset[col]:
+            h.update(json.dumps(list(row), separators=(",", ":")).encode())
+            h.update(b"\n")
+    return h.hexdigest()
+
+
+def file_sha256(path: str | Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 24), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def weights_sha256(model_dir: str | Path) -> str:
+    """sha256 over names + bytes of every *.safetensors file (sorted) in the base-model dir."""
+    files = sorted(Path(model_dir).glob("*.safetensors"))
+    if not files:
+        raise FileNotFoundError(f"no *.safetensors in {model_dir}")
+    h = hashlib.sha256()
+    for f in files:
+        h.update(f.name.encode())
+        h.update(file_sha256(f).encode())
+    return h.hexdigest()
+
+
+def eval_set_hash(cfg: dict[str, Any], dry_run: bool) -> str | None:
+    """sha256 of data.eval (+ data.eval_adversarial if given). None only in --dry-run when absent."""
+    h = hashlib.sha256()
+    paths = [cfg["data"].get(k) for k in ("eval", "eval_adversarial")]
+    paths = [p for p in paths if p]
+    if not paths or any(not Path(p).is_file() for p in paths):
+        if dry_run:
+            return None
+        raise FileNotFoundError(f"eval set(s) missing: {paths}")
+    for p in paths:
+        h.update(file_sha256(p).encode())
+    return h.hexdigest()
+
+
+def assert_completion_only(labels_rows: list[list[int]], n_rows: int = 8) -> None:
+    """Un-padded rows must mask the prompt (first label -100) yet supervise something."""
+    for i, labels in enumerate(labels_rows[:n_rows]):
+        supervised = [x for x in labels if x != IGNORE_INDEX]
+        if not supervised or labels[0] != IGNORE_INDEX:
+            raise ValueError(
+                f"label sanity failed on row {i}: the prompt must be masked and the reply supervised"
+            )
+
+
+def train_loss_final(log_history: list[dict[str, Any]], window: int = LOSS_WINDOW) -> float | None:
+    """Mean of the last `window` logged training-loss values (entries with a 'loss' key)."""
+    losses = [float(e["loss"]) for e in log_history if "loss" in e]
+    if not losses:
+        return None
+    tail = losses[-window:]
+    return sum(tail) / len(tail)
+
+
+# --- git / attempts / resume safety -----------------------------------------
+
+
+def git_sha(repo: str | Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def tree_dirty(repo: str | Path) -> bool:
+    out = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain"], capture_output=True, text=True, check=True
+    ).stdout
+    return bool(out.strip())
+
+
+def _attempt_dirs(job_dir: Path) -> list[Path]:
+    def n(p: Path) -> int:
+        return int(p.name.rsplit("-", 1)[1])
+
+    return sorted(
+        (p for p in job_dir.glob("attempt-train-*") if p.name.rsplit("-", 1)[1].isdigit()), key=n
+    )
+
+
+def begin_attempt(job_dir: Path, head_sha: str) -> tuple[Path, str | None]:
+    """Return (current attempt dir, sha of the previous attempt that actually started).
+
+    The dispatcher pre-creates attempt-train-N (with git_sha.txt) before launching; that
+    unstarted dir is adopted. Run by hand, a new one is created. The current attempt is
+    marked started so the NEXT attempt can compare against it.
+    """
+    attempts = _attempt_dirs(job_dir)
+    if attempts and not (attempts[-1] / STARTED_MARKER).exists():
+        current = attempts[-1]
+        previous = [a for a in attempts[:-1] if (a / STARTED_MARKER).exists()]
+    else:
+        current = job_dir / f"attempt-train-{len(attempts) + 1}"
+        current.mkdir(parents=True, exist_ok=True)
+        previous = [a for a in attempts if (a / STARTED_MARKER).exists()]
+    prev_sha = None
+    if previous and (previous[-1] / "git_sha.txt").exists():
+        prev_sha = (previous[-1] / "git_sha.txt").read_text().strip()
+    (current / "git_sha.txt").write_text(head_sha + "\n")
+    (current / STARTED_MARKER).write_text(head_sha + "\n")
+    return current, prev_sha
+
+
+def check_resume_sha(prev_sha: str | None, head_sha: str, allow_change: bool) -> None:
+    """Refuse to resume a checkpoint written by a different git_sha (or an unknown one)."""
+    if allow_change or prev_sha == head_sha:
+        return
+    if prev_sha is None:
+        raise SystemExit(
+            "refusing to resume: the checkpoint has no recorded git_sha (written by an unknown commit) "
+            "(pass --allow-sha-change to override)"
         )
-
-
-# --------------------------------------------------------------------------- #
-# Runtime self-checks (every invocation; cheap; fail fast)                     #
-# --------------------------------------------------------------------------- #
-
-
-def _sample_batch(dataset: Dataset, collator: DataCollatorForSeq2Seq, n: int = 2) -> dict:
-    rows = [dataset[i] for i in range(min(n, len(dataset)))]
-    return collator(rows)
-
-
-def preflight_label_check(dataset: Dataset, collator: DataCollatorForSeq2Seq) -> None:
-    """Pre-flight (b): a collated batch must contain BOTH supervised tokens and
-    -100 — neither all-supervised nor all-masked."""
-    labels = _sample_batch(dataset, collator)["labels"]
-    n_supervised = int((labels != IGNORE_INDEX).sum())
-    n_masked = int((labels == IGNORE_INDEX).sum())
-    assert n_supervised > 0 and n_masked > 0, (
-        f"label sanity failed: supervised={n_supervised}, masked={n_masked} "
-        "(expected both > 0; all-masked or all-supervised ⇒ misaligned labels)"
-    )
-    print(f"[pre-flight] labels OK: {n_supervised} supervised / {n_masked} masked in sample batch")
-
-
-def preflight_loss_read(model, dataset: Dataset, collator: DataCollatorForSeq2Seq) -> None:
-    """Pre-flight (c, advisory): one forward pass; print the initial loss and a
-    magnitude read. Does not assert — just surfaces obvious misalignment."""
-    batch = {k: v.to(model.device) for k, v in _sample_batch(dataset, collator).items()}
-    with torch.no_grad():
-        loss = float(model(**batch).loss)
-    print(
-        f"[pre-flight] initial loss = {loss:.3f}  "
-        "(1–3 normal; near ln(vocab)≈11.6 ⇒ likely label misalignment; 0 or NaN ⇒ problem)"
+    raise SystemExit(
+        f"refusing to resume: the checkpoint was written at {prev_sha[:10]}, HEAD is {head_sha[:10]} "
+        "(pass --allow-sha-change to override)"
     )
 
 
-def snapshot_experiment(exp_dir: Path, config_path: str) -> None:
-    """Save the config + a pip freeze of THIS interpreter's env (the llm env)
-    into the experiment dir, for reproducibility."""
-    exp_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy(config_path, exp_dir / "config.yaml")
-    freeze = subprocess.run(
-        [sys.executable, "-m", "pip", "freeze"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    (exp_dir / "pip_freeze.txt").write_text(freeze.stdout)
-    print(f"Experiment snapshot -> {exp_dir}")
+def record_checkpoint_sha(checkpoint_dir: str | Path, head_sha: str) -> None:
+    (Path(checkpoint_dir) / CKPT_SHA_FILE).write_text(head_sha + "\n")
+
+
+def checkpoint_sha(checkpoint_dir: str | Path) -> str | None:
+    """The git_sha that WROTE this checkpoint (None if unrecorded)."""
+    f = Path(checkpoint_dir) / CKPT_SHA_FILE
+    return f.read_text().strip() if f.exists() else None
+
+
+def write_metrics_csv(path: Path, log_history: list[dict[str, Any]]) -> None:
+    keys: list[str] = []
+    for e in log_history:
+        for k in e:
+            if k not in keys:
+                keys.append(k)
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=keys)
+        w.writeheader()
+        w.writerows(log_history)
+
+
+def write_json_atomic(path: Path, obj: dict[str, Any]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, indent=2, sort_keys=True) + "\n")
+    os.replace(tmp, path)
+
+
+def library_versions() -> dict[str, str | None]:
+    from importlib import metadata
+
+    out: dict[str, str | None] = {}
+    for name in ("torch", "transformers", "peft", "trl"):
+        try:
+            out[name] = metadata.version(name)
+        except metadata.PackageNotFoundError:
+            out[name] = None
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -193,99 +402,158 @@ def snapshot_experiment(exp_dir: Path, config_path: str) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    parser.add_argument("--config", default=DEFAULT_CONFIG, help="Path to YAML config file")
-    args = parser.parse_args()
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--config", required=True, help="frozen launched config (YAML)")
+    ap.add_argument("--job-dir", required=True, help="experiment/job directory")
+    ap.add_argument("--dry-run", action="store_true", help="32 examples, 5 steps, checkpoints in job dir")
+    ap.add_argument("--resume-test", action="store_true", help="with --dry-run: resume the 5-step run, train to 7")
+    ap.add_argument("--allow-sha-change", action="store_true", help="resume across a different git_sha")
+    args = ap.parse_args(argv)
+    if args.resume_test and not args.dry_run:
+        ap.error("--resume-test requires --dry-run")
+
+    os.environ["WANDB_MODE"] = "disabled"
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    t0 = time.time()
 
     cfg = load_config(args.config)
+    head = git_sha(REPO_ROOT)
+    if tree_dirty(REPO_ROOT):
+        raise SystemExit("refusing to start: working tree of the ML repo is dirty (commit first)")
+
+    job_dir = Path(args.job_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "results.json").unlink(missing_ok=True)  # written only on success
+    attempt_dir, _ = begin_attempt(job_dir, head)
+
+    import torch
+    from datasets import Dataset, DatasetDict, load_from_disk
+    from peft import LoraConfig, get_peft_model
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoTokenizer,
+        DataCollatorForSeq2Seq,
+        Trainer,
+        TrainerCallback,
+        TrainingArguments,
+        set_seed,
+    )
+    from transformers.trainer_utils import get_last_checkpoint
+
     set_seed(cfg["seed"])
 
-    base_model = cfg["model"]["base_model"]
-    lora_cfg = cfg["lora"]
-    data_cache = cfg["paths"]["data_cache"]
-    output_dir = cfg["paths"]["output_dir"]
-
-    # --- dataset (pre-tokenized; we only consume it) ---
-    print(f"Loading tokenized dataset from {data_cache} ...")
-    ds = load_from_disk(data_cache)
+    # --- data (pre-tokenized; we only consume it) ---
+    tok_dir = resolve_tokenized_dir(cfg["data"]["tokenized_dir"])
+    print(f"Loading tokenized dataset from {tok_dir}")
+    ds = load_from_disk(tok_dir)
     if isinstance(ds, DatasetDict):
         ds = ds["train"]
     assert isinstance(ds, Dataset)
-    assert_dataset_columns(ds)  # pre-flight (a)
+    assert_dataset_columns(ds)
+    if args.dry_run:
+        ds = take_first_n(ds, cfg["data"]["dry_run_examples"])
+    assert_max_length(ds, cfg["data"]["max_length"])
+    train_ds, val_ds = split_train_val(ds, float(cfg["data"]["val_fraction"]), cfg["data_seed"])
+    train_hash, val_hash = dataset_hash(train_ds), dataset_hash(val_ds)
+    eval_hash = eval_set_hash(cfg, args.dry_run)  # fail fast, before any training
+    weights_hash = weights_sha256(cfg["model"]["base"])
+    print(f"train={len(train_ds)} val={len(val_ds)} eval_hash={'set' if eval_hash else 'None (dry run)'}")
 
-    subset_size = cfg["training"].get("subset_size")
-    ds = take_first_n(ds, subset_size)
-    note = f" (subset_size={subset_size})" if subset_size else ""
-    print(f"Training on {len(ds)} examples{note}")
+    # --- output locations ---
+    logs_root = os.environ.get("LOGS_DIR", env_defaults()["LOGS_DIR"])
+    logging_dir = Path(logs_root) / cfg["exp_name"]
+    logging_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = str(job_dir / DRY_CKPT) if args.dry_run else cfg["train"]["output_dir"]
+    if args.dry_run and not args.resume_test:
+        shutil.rmtree(output_dir, ignore_errors=True)  # a plain dry run is rerunnable
+    max_steps = (RESUME_TEST_STEPS if args.resume_test else DRY_RUN_STEPS) if args.dry_run else -1
 
-    # --- tokenizer ---
-    tokenizer = AutoTokenizer.from_pretrained(base_model)
+    # --- resume decision (and its git_sha safety check) ---
+    resume = None
+    if args.resume_test or cfg["train"]["resume_from_checkpoint"] == "auto":
+        resume = get_last_checkpoint(output_dir) if Path(output_dir).is_dir() else None
+    if args.resume_test and resume is None:
+        raise SystemExit(f"--resume-test: no checkpoint under {output_dir}; run --dry-run first")
+    if resume is not None:
+        check_resume_sha(checkpoint_sha(resume), head, args.allow_sha_change)
+        print(f"Resuming from {resume}")
+
+    # --- tokenizer / model ---
+    base = cfg["model"]["base"]
+    tokenizer = AutoTokenizer.from_pretrained(base)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-
-    # --- model (single-GPU; force everything on GPU 0 for Trainer device control) ---
-    print("Loading base model (loads the 7B; may take >1 min) ...")
     model = AutoModelForCausalLM.from_pretrained(
-        base_model,
+        base,
         torch_dtype=torch.bfloat16,
+        attn_implementation=cfg["model"]["attn_implementation"],
         device_map={"": 0},
     )
-
-    lora_config = LoraConfig(
-        r=lora_cfg["r"],
-        lora_alpha=lora_cfg["alpha"],
-        lora_dropout=lora_cfg["dropout"],
-        target_modules=lora_cfg["target_modules"],
-        bias=lora_cfg["bias"],
-        task_type="CAUSAL_LM",
+    lc = cfg["lora"]
+    model = get_peft_model(
+        model,
+        LoraConfig(
+            r=lc["r"], lora_alpha=lc["alpha"], lora_dropout=lc["dropout"],
+            target_modules=lc["target_modules"], bias=lc["bias"], task_type=lc["task_type"],
+        ),
     )
-    # Order matters: attach LoRA, THEN enable input grads, THEN disable cache.
-    model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
-    # enable_input_require_grads / config are PreTrainedModel APIs that the PEFT
-    # wrapper delegates to the base model. Cast narrows to that interface so the
-    # type checker resolves them (nn.Module.__getattr__ otherwise widens any
-    # delegated attribute to Tensor | Module).
-    pt_model = cast(PreTrainedModel, model)
-    pt_model.enable_input_require_grads()  # REQUIRED so grads reach LoRA under grad ckpt
-    pt_model.config.use_cache = False      # incompatible with gradient checkpointing
+    if cfg["model"]["gradient_checkpointing"]:
+        model.enable_input_require_grads()  # REQUIRED so grads reach LoRA under grad ckpt
+    model.config.use_cache = False
 
-    # Required collator: pads labels with -100 (the default collator does not,
-    # which would silently misalign them). Do NOT pass model= (triggers
-    # encoder-decoder decoder_input_ids logic we don't want).
-    collator = DataCollatorForSeq2Seq(
-        tokenizer, padding=True, label_pad_token_id=IGNORE_INDEX
+    collator = DataCollatorForSeq2Seq(tokenizer, padding=True, label_pad_token_id=IGNORE_INDEX)
+    assert_completion_only(train_ds.select(range(min(8, len(train_ds))))["labels"])
+
+    (job_dir / "pip_freeze.txt").write_text(
+        subprocess.run([sys.executable, "-m", "pip", "freeze"], check=False, capture_output=True, text=True).stdout
     )
 
-    preflight_label_check(ds, collator)        # (b) hard assert
-    preflight_loss_read(model, ds, collator)   # (c) advisory
+    class CsvMetrics(TrainerCallback):
+        def on_log(self, a, state, control, logs=None, **kw):
+            write_metrics_csv(job_dir / "metrics.csv", state.log_history)
+            write_metrics_csv(logging_dir / "metrics.csv", state.log_history)
 
-    # --- experiment snapshot (config + pip freeze) ---
-    date_str = datetime.now().strftime("%Y_%m_%d")
-    exp_dir = experiment_snapshot_dir(cfg["experiment_dir"], cfg["run_name"], date_str)
-    snapshot_experiment(exp_dir, args.config)
+        def on_save(self, a, state, control, **kw):
+            record_checkpoint_sha(Path(a.output_dir) / f"checkpoint-{state.global_step}", head)
 
-    # --- train ---
-    training_args = TrainingArguments(**build_training_kwargs(cfg))
-    trainer = NpcTrainer(
-        model=model,
-        args=training_args,
-        train_dataset=ds,
-        data_collator=collator,
-        processing_class=tokenizer,
+    targs = TrainingArguments(
+        **build_training_kwargs(cfg, output_dir, str(logging_dir), dry_run=args.dry_run, max_steps=max_steps)
     )
+    trainer = Trainer(
+        model=model, args=targs, train_dataset=train_ds, eval_dataset=val_ds,
+        data_collator=collator, processing_class=tokenizer, callbacks=[CsvMetrics()],
+    )
+    trainer.train(resume_from_checkpoint=resume)
+    val = trainer.evaluate()
+    write_metrics_csv(job_dir / "metrics.csv", trainer.state.log_history)
+    write_metrics_csv(logging_dir / "metrics.csv", trainer.state.log_history)
+    if not args.dry_run:
+        trainer.save_model(output_dir)
+        tokenizer.save_pretrained(output_dir)
 
-    try:
-        trainer.train()
-    except KeyboardInterrupt:
-        print("\nInterrupted — saving current adapter before exit ...")
-
-    trainer.save_model(output_dir)
-    tokenizer.save_pretrained(output_dir)
-    print(f"Done. Adapter + tokenizer saved to {output_dir}")
+    results = {
+        "train_loss_final": train_loss_final(trainer.state.log_history),
+        "train_loss_final_definition": f"mean of the last {LOSS_WINDOW} logged training-loss values",
+        "val_loss": val.get("eval_loss"),
+        "steps": trainer.state.global_step,
+        "wall_sec": round(time.time() - t0, 1),
+        "versions": library_versions(),
+        "git_sha": head,
+        "config_sha256": file_sha256(args.config),
+        "train_hash": train_hash,
+        "val_hash": val_hash,
+        "eval_hash": eval_hash,
+        "model_weights_sha256": weights_hash,
+        "seed": cfg["seed"],
+        "data_seed": cfg["data_seed"],
+        "dry_run": bool(args.dry_run),
+        "resumed_from": resume,
+        "attempt": attempt_dir.name,
+    }
+    write_json_atomic(job_dir / "results.json", results)
+    print(f"Done. results.json written to {job_dir}")
 
 
 if __name__ == "__main__":

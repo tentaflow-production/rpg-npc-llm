@@ -18,7 +18,7 @@ from pathlib import Path
 # Make scripts/ importable without installing the project.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-import prepare_dataset as pd  # noqa: E402
+import prepare_dataset as pd
 
 
 def _sid(s: str) -> int:
@@ -113,7 +113,7 @@ class TestTokenizeExampleMasking(unittest.TestCase):
 
     def test_single_round_supervises_only_assistant_reply(self):
         out = pd.tokenize_example({"messages": SINGLE}, self.tok, max_length=1000)
-        expected = [self.tok._word(w) for w in "depends got coin".split()]
+        expected = [self.tok._word(w) for w in ["depends", "got", "coin"]]
         expected.append(FakeTokenizer.IM_END)  # answer content + closing token
         self.assertEqual(self._supervised_ids(out), expected)
 
@@ -127,7 +127,7 @@ class TestTokenizeExampleMasking(unittest.TestCase):
     def test_system_and_user_fully_masked(self):
         out = pd.tokenize_example({"messages": SINGLE}, self.tok, max_length=1000)
         sup = self._supervised_ids(out)
-        for w in "you are a gruff blacksmith can make sword".split():
+        for w in ["you", "are", "a", "gruff", "blacksmith", "can", "make", "sword"]:
             self.assertNotIn(self.tok._word(w), sup)
 
     def test_labels_match_input_ids_where_supervised(self):
@@ -140,9 +140,9 @@ class TestTokenizeExampleMasking(unittest.TestCase):
         out = pd.tokenize_example({"messages": MULTI}, self.tok, max_length=1000)
         sup = self._supervised_ids(out)
         expected = (
-            [self.tok._word(w) for w in "what do you want".split()]
+            [self.tok._word(w) for w in ["what", "do", "you", "want"]]
             + [FakeTokenizer.IM_END]
-            + [self.tok._word(w) for w in "fifty gold up front".split()]
+            + [self.tok._word(w) for w in ["fifty", "gold", "up", "front"]]
             + [FakeTokenizer.IM_END]
         )
         self.assertEqual(sup, expected)

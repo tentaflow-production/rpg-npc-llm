@@ -1,0 +1,57 @@
+# Smoke config for `train_qwen_sft.py --dry-run` (32 examples, 5 steps). Same schema as the
+# supervisor's experiments/config.template.yaml; every training value is explicit.
+# ${VAR} = environment variable; nothing else is templated.
+
+exp_name: smoke
+trainer_script: scripts/train_qwen_sft.py
+target_metric: eval_loss
+baseline: none
+hypothesis: "the training path runs end to end, resumes, and writes results.json"
+seed: 42
+data_seed: 42
+
+model:
+  base: ${MODELS_DIR}/Qwen2.5-7B-Instruct
+  dtype: bf16
+  attn_implementation: sdpa
+  gradient_checkpointing: true         # keep ON: smoke must exercise enable_input_require_grads
+  weights_sha256: ""                   # filled by the trainer into results.json (not here)
+
+data:
+  format: tokenized                    # [inferred] pre-tokenized output of prepare_dataset.py (labels already masked)
+  # a tokenized dataset, or a parent holding dialogues_built_* (newest wins; pinned by train_hash)
+  tokenized_dir: ${DATASETS_DIR}/rpg-npc-llm-dataset-pipeline/tokenized
+  val_fraction: 0.1                    # validation split cut from train by data_seed
+  eval: ${ML_REPO}/experiments/smoke_eval.json  # committed stand-in until M1 creates data/eval_set.jsonl
+  max_length: 1024
+  packing: false
+  completion_only_loss: true
+  dry_run_examples: 32
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  bias: none
+  task_type: CAUSAL_LM
+
+train:
+  epochs: 1
+  per_device_batch: 2
+  grad_accum: 1
+  lr: 2.0e-4
+  scheduler: cosine
+  warmup_ratio: 0.03
+  optim: adamw_torch
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  logging_steps: 1
+  eval_strategy: epoch
+  save_strategy: epoch
+  save_total_limit: 2
+  load_best_model_at_end: true
+  metric_for_best_model: eval_loss
+  resume_from_checkpoint: auto
+  report_to: none
+  output_dir: ${CHECKPOINTS_DIR}/${exp_name}

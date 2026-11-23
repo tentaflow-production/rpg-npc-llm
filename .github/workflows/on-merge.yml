@@ -1,0 +1,33 @@
+name: on-merge
+# Installed verbatim into a target repo (rumor_game, rpg-npc-llm) as .github/workflows/on-merge.yml by G0.1 / M0.
+# When a feat/* PR is merged into main, tell the supervisor (repository_dispatch `target-merged`); its mailbox
+# workflow marks the roadmap item on that branch review -> done on the supervisor's `nightly` branch (S4).
+#
+# One secret, added by the human in this repo's Settings -> Secrets and variables -> Actions:
+#   SUPERVISOR_DISPATCH_TOKEN  a fine-grained personal access token whose only repository is
+#                              tentaflow-production/npc_game_supervisor, permission "Contents: Read and write"
+#                              (what the dispatches API requires). Nothing else.
+# Without the secret this job fails visibly (a red run, an email) and nothing else changes.
+# Branch name and PR number travel as env vars and JSON, never spliced into the shell command.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  dispatch:
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'feat/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: tell the supervisor which branch was merged
+        env:
+          GH_TOKEN: ${{ secrets.SUPERVISOR_DISPATCH_TOKEN }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          jq -n --arg repo "$GITHUB_REPOSITORY" --arg branch "$HEAD_REF" --argjson pr "$PR_NUMBER" --arg sha "$MERGE_SHA" \
+            '{event_type: "target-merged", client_payload: {repo: $repo, branch: $branch, pr: $pr, sha: $sha}}' \
+          | gh api repos/tentaflow-production/npc_game_supervisor/dispatches --input -
