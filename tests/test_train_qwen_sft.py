@@ -235,6 +235,30 @@ def test_check_resume_sha():
         tr.check_resume_sha(None, "def", False)
 
 
+def test_checkpoint_sha_roundtrip_and_unrecorded(tmp_path):
+    ck = tmp_path / "checkpoint-5"
+    ck.mkdir()
+    assert tr.checkpoint_sha(ck) is None
+    tr.record_checkpoint_sha(ck, "aaa")
+    assert tr.checkpoint_sha(ck) == "aaa"
+    with pytest.raises(SystemExit, match="refusing to resume"):
+        tr.check_resume_sha(tr.checkpoint_sha(ck), "bbb", False)  # attempt at B must not resume A's checkpoint
+
+
+def test_validate_rejects_bad_resume_value():
+    with pytest.raises(ValueError, match="resume_from_checkpoint"):
+        tr.validate_config(make_cfg(resume_from_checkpoint="/some/path"))
+    tr.validate_config(make_cfg(resume_from_checkpoint="none"))
+
+
+def test_assert_completion_only():
+    tr.assert_completion_only([[-100, -100, 5, 6]])
+    with pytest.raises(ValueError, match="label sanity"):
+        tr.assert_completion_only([[1, 2, 3]])  # prompt not masked
+    with pytest.raises(ValueError, match="label sanity"):
+        tr.assert_completion_only([[-100, -100]])  # nothing supervised
+
+
 # --- dirty tree ----------------------------------------------------------
 
 

@@ -1,0 +1,1 @@
+{"_note": "smoke-test stand-in for data/eval_set.jsonl (M1) so the dry run hashes a real eval file", "rows": [{"id": "smoke-1", "input": "hello"}, {"id": "smoke-2", "input": "who are you"}]}

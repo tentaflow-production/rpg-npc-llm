@@ -15,5 +15,10 @@ if [[ -d "${MODELS_DIR:-$HOME/models}/Qwen2.5-7B-Instruct" ]]; then
   python -c "import json,os;r=json.load(open(os.environ['EXPERIMENTS_DIR']+'/smoke/results.json'));assert r['steps']>=5 and all(k in r for k in ('git_sha','config_sha256','train_hash','val_hash','eval_hash'))"
   python scripts/train_qwen_sft.py --config experiments/smoke.yaml --job-dir "$EXPERIMENTS_DIR/smoke" --dry-run --resume-test
 else
-  echo "regression: no local models; GPU smoke skipped"
+  echo "regression: *** SKIPPED *** GPU smoke, results.json check and resume test (no local models; M0 done-when NOT fully exercised)"
+fi
+if [[ -n "${SUPERVISOR_REPO:-}" && -f "$SUPERVISOR_REPO/docs/target-repo-workflows/on-merge.yml" ]]; then
+  cmp -s .github/workflows/on-merge.yml "$SUPERVISOR_REPO/docs/target-repo-workflows/on-merge.yml"
+else
+  echo "regression: *** SKIPPED *** on-merge.yml comparison (SUPERVISOR_REPO not available)"
 fi

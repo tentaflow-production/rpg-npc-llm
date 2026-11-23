@@ -37,8 +37,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 IGNORE_INDEX = -100
 REQUIRED_COLUMNS = {"input_ids", "attention_mask", "labels"}
 LOSS_WINDOW = 10  # train_loss_final = mean of the last 10 logged training-loss values
-DRY_RUN_STEPS = 5
-RESUME_TEST_STEPS = 7  # --resume-test resumes the 5-step dry run and trains 2 more steps
+DRY_RUN_STEPS = 5  # [inferred] roadmap: "5 steps"
+RESUME_TEST_STEPS = 7  # [inferred] --resume-test resumes the 5-step dry run and trains 2 more steps
+CKPT_SHA_FILE = "git_sha.txt"  # written into every checkpoint dir: the HEAD that saved it
 DRY_CKPT = "dry_run_ckpt"
 STARTED_MARKER = "trainer_started"
 
@@ -115,6 +116,8 @@ def validate_config(cfg: dict[str, Any]) -> None:
     t = cfg["train"]
     if t["load_best_model_at_end"] and t["eval_strategy"] != t["save_strategy"]:
         raise ValueError("eval_strategy must equal save_strategy when load_best_model_at_end is true")
+    if t["resume_from_checkpoint"] not in ("auto", "none"):
+        raise ValueError("train.resume_from_checkpoint must be 'auto' or 'none'")
     if not 0 < float(cfg["data"]["val_fraction"]) < 1:
         raise ValueError("data.val_fraction must be in (0, 1)")
 
@@ -272,6 +275,16 @@ def eval_set_hash(cfg: dict[str, Any], dry_run: bool) -> str | None:
     return h.hexdigest()
 
 
+def assert_completion_only(labels_rows: list[list[int]], n_rows: int = 8) -> None:
+    """Un-padded rows must mask the prompt (first label -100) yet supervise something."""
+    for i, labels in enumerate(labels_rows[:n_rows]):
+        supervised = [x for x in labels if x != IGNORE_INDEX]
+        if not supervised or labels[0] != IGNORE_INDEX:
+            raise ValueError(
+                f"label sanity failed on row {i}: the prompt must be masked and the reply supervised"
+            )
+
+
 def train_loss_final(log_history: list[dict[str, Any]], window: int = LOSS_WINDOW) -> float | None:
     """Mean of the last `window` logged training-loss values (entries with a 'loss' key)."""
     losses = [float(e["loss"]) for e in log_history if "loss" in e]
@@ -335,13 +348,23 @@ def check_resume_sha(prev_sha: str | None, head_sha: str, allow_change: bool) ->
         return
     if prev_sha is None:
         raise SystemExit(
-            "refusing to resume: a checkpoint exists but the previous attempt's git_sha is unknown "
+            "refusing to resume: the checkpoint has no recorded git_sha (written by an unknown commit) "
             "(pass --allow-sha-change to override)"
         )
     raise SystemExit(
-        f"refusing to resume: previous attempt ran at {prev_sha[:10]}, HEAD is {head_sha[:10]} "
+        f"refusing to resume: the checkpoint was written at {prev_sha[:10]}, HEAD is {head_sha[:10]} "
         "(pass --allow-sha-change to override)"
     )
+
+
+def record_checkpoint_sha(checkpoint_dir: str | Path, head_sha: str) -> None:
+    (Path(checkpoint_dir) / CKPT_SHA_FILE).write_text(head_sha + "\n")
+
+
+def checkpoint_sha(checkpoint_dir: str | Path) -> str | None:
+    """The git_sha that WROTE this checkpoint (None if unrecorded)."""
+    f = Path(checkpoint_dir) / CKPT_SHA_FILE
+    return f.read_text().strip() if f.exists() else None
 
 
 def write_metrics_csv(path: Path, log_history: list[dict[str, Any]]) -> None:
@@ -402,7 +425,7 @@ def main(argv: list[str] | None = None) -> None:
     job_dir = Path(args.job_dir)
     job_dir.mkdir(parents=True, exist_ok=True)
     (job_dir / "results.json").unlink(missing_ok=True)  # written only on success
-    attempt_dir, prev_sha = begin_attempt(job_dir, head)
+    attempt_dir, _ = begin_attempt(job_dir, head)
 
     import torch
     from datasets import Dataset, DatasetDict, load_from_disk
@@ -433,12 +456,14 @@ def main(argv: list[str] | None = None) -> None:
     assert_max_length(ds, cfg["data"]["max_length"])
     train_ds, val_ds = split_train_val(ds, float(cfg["data"]["val_fraction"]), cfg["data_seed"])
     train_hash, val_hash = dataset_hash(train_ds), dataset_hash(val_ds)
-    eval_hash = eval_set_hash(cfg, args.dry_run)
+    eval_hash = eval_set_hash(cfg, args.dry_run)  # fail fast, before any training
+    weights_hash = weights_sha256(cfg["model"]["base"])
     print(f"train={len(train_ds)} val={len(val_ds)} eval_hash={'set' if eval_hash else 'None (dry run)'}")
 
     # --- output locations ---
     logs_root = os.environ.get("LOGS_DIR", env_defaults()["LOGS_DIR"])
-    logging_dir = str(Path(logs_root) / cfg["exp_name"])
+    logging_dir = Path(logs_root) / cfg["exp_name"]
+    logging_dir.mkdir(parents=True, exist_ok=True)
     output_dir = str(job_dir / DRY_CKPT) if args.dry_run else cfg["train"]["output_dir"]
     if args.dry_run and not args.resume_test:
         shutil.rmtree(output_dir, ignore_errors=True)  # a plain dry run is rerunnable
@@ -451,7 +476,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.resume_test and resume is None:
         raise SystemExit(f"--resume-test: no checkpoint under {output_dir}; run --dry-run first")
     if resume is not None:
-        check_resume_sha(prev_sha, head, args.allow_sha_change)
+        check_resume_sha(checkpoint_sha(resume), head, args.allow_sha_change)
         print(f"Resuming from {resume}")
 
     # --- tokenizer / model ---
@@ -479,9 +504,7 @@ def main(argv: list[str] | None = None) -> None:
     model.config.use_cache = False
 
     collator = DataCollatorForSeq2Seq(tokenizer, padding=True, label_pad_token_id=IGNORE_INDEX)
-    sample = collator([train_ds[i] for i in range(min(2, len(train_ds)))])["labels"]
-    if not ((sample != IGNORE_INDEX).any() and (sample == IGNORE_INDEX).any()):
-        raise SystemExit("label sanity failed: a batch must contain both supervised and masked tokens")
+    assert_completion_only(train_ds.select(range(min(8, len(train_ds))))["labels"])
 
     (job_dir / "pip_freeze.txt").write_text(
         subprocess.run([sys.executable, "-m", "pip", "freeze"], check=False, capture_output=True, text=True).stdout
@@ -490,9 +513,13 @@ def main(argv: list[str] | None = None) -> None:
     class CsvMetrics(TrainerCallback):
         def on_log(self, a, state, control, logs=None, **kw):
             write_metrics_csv(job_dir / "metrics.csv", state.log_history)
+            write_metrics_csv(logging_dir / "metrics.csv", state.log_history)
+
+        def on_save(self, a, state, control, **kw):
+            record_checkpoint_sha(Path(a.output_dir) / f"checkpoint-{state.global_step}", head)
 
     targs = TrainingArguments(
-        **build_training_kwargs(cfg, output_dir, logging_dir, dry_run=args.dry_run, max_steps=max_steps)
+        **build_training_kwargs(cfg, output_dir, str(logging_dir), dry_run=args.dry_run, max_steps=max_steps)
     )
     trainer = Trainer(
         model=model, args=targs, train_dataset=train_ds, eval_dataset=val_ds,
@@ -501,6 +528,7 @@ def main(argv: list[str] | None = None) -> None:
     trainer.train(resume_from_checkpoint=resume)
     val = trainer.evaluate()
     write_metrics_csv(job_dir / "metrics.csv", trainer.state.log_history)
+    write_metrics_csv(logging_dir / "metrics.csv", trainer.state.log_history)
     if not args.dry_run:
         trainer.save_model(output_dir)
         tokenizer.save_pretrained(output_dir)
@@ -517,7 +545,7 @@ def main(argv: list[str] | None = None) -> None:
         "train_hash": train_hash,
         "val_hash": val_hash,
         "eval_hash": eval_hash,
-        "model_weights_sha256": weights_sha256(base),
+        "model_weights_sha256": weights_hash,
         "seed": cfg["seed"],
         "data_seed": cfg["data_seed"],
         "dry_run": bool(args.dry_run),

@@ -22,8 +22,7 @@ data:
   # a tokenized dataset, or a parent holding dialogues_built_* (newest wins; pinned by train_hash)
   tokenized_dir: ${DATASETS_DIR}/rpg-npc-llm-dataset-pipeline/tokenized
   val_fraction: 0.1                    # validation split cut from train by data_seed
-  eval: ${ML_REPO}/data/eval_set.jsonl # absent until M1; eval_hash is null only under --dry-run
-  eval_adversarial: ${ML_REPO}/data/eval_adversarial.jsonl
+  eval: ${ML_REPO}/experiments/smoke_eval.json  # committed stand-in until M1 creates data/eval_set.jsonl
   max_length: 1024
   packing: false
   completion_only_loss: true
