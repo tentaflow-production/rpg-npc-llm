@@ -22,3 +22,11 @@ if [[ -n "${SUPERVISOR_REPO:-}" && -f "$SUPERVISOR_REPO/docs/target-repo-workflo
 else
   echo "regression: *** SKIPPED *** on-merge.yml comparison (SUPERVISOR_REPO not available)"
 fi
+
+# --- M0b: local inference server and GPU job contract ----------------------
+python -m pytest tests/test_jobs.py -q
+if [[ -d "${MODELS_DIR:-$HOME/models}/Qwen2.5-7B-Instruct" ]]; then
+  bash scripts/serve.sh --model "${MODELS_DIR:-$HOME/models}/Qwen2.5-7B-Instruct" --fit-check
+else
+  echo "regression: *** SKIPPED *** serve.sh fit check (no local models)"
+fi
