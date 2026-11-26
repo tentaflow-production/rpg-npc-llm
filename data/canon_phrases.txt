@@ -1,0 +1,27 @@
+# Canon names allowed to overlap between eval and training text (PROTOCOL 'Dataset hygiene'). One phrase per line.
+# Source: canon 04 name mapping + scene list, 05 s0/s1. Item/place names only; no sentences.
+Jay
+Aurelia
+Bohan
+Cecily
+Dorian
+Elwin
+Common Gems
+Lunar's Bistro
+Task Center
+Newspaper Office
+Common Gems back office
+Alchemy Stall
+Aurelia's Rooftop
+Commercial Street
+Jay's Cottage
+Alley
+月之石
+初月融水
+聆听秘密的火柴
+行踪问答火柴
+留影石
+炼金跑腿协会
+教廷
+教皇
+Moonstone
