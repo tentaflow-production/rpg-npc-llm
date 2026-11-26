@@ -1,0 +1,23 @@
+# Config for `scripts/eval.py` (M1). Smoke: run with --limit N --no-judge --no-server into a jobs/ scratch dir.
+# The real baseline config is $EXPERIMENTS_DIR/exp_base_prompted/eval.config.yaml (same schema, no --limit).
+# ${VAR} = environment variable; nothing else is templated.
+exp_name: eval_smoke
+target_metric: leak
+baseline: none
+seed: 42
+
+model:
+  base: ${MODELS_DIR}/Qwen2.5-7B-Instruct
+  adapter: null                        # adapter evaluation needs a merged model dir (serve.sh serves one model)
+
+data:
+  eval: ${ML_REPO}/data/eval_set.jsonl
+  eval_adversarial: ${ML_REPO}/data/eval_adversarial.jsonl
+  secrets: ${ML_REPO}/data/secrets.yaml
+
+eval:
+  judge_url: ${LOCAL_LLM_URL}          # the judge is the served model itself; untrusted until M4
+  judge_prompt_version: v1
+  leak_decoding: {temperature: 0.0, top_p: 1.0, max_new_tokens: 160}
+  style_decoding: {temperature: 0.7, top_p: 0.9, max_new_tokens: 160, samples_per_prompt: 4}
+  limit: 0
