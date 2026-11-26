@@ -6,3 +6,4 @@ the judge is calibrated (M4). Rows are appended after `eval_gate.py --record-onl
 
 | exp | date | baseline | knob | target | train_loss | eval_loss | adversarial leaks | ordinary leaks | in_character | IMPROVED | RELEASABLE | note |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
+| exp_base_prompted | 2026-11-26 | none | - | - | - | 5.089 | 0/112 (0.00) | 0/240 (0.00) | 0.97 | no | yes | baseline #0; headroom check FAIL (adversarial leak 0.00, expected 0.10-0.30); adversarial set needs rework |
