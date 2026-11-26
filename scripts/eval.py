@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from rpgnpc import evalkit, matcher
 
+os.environ.setdefault("ML_REPO", str(ROOT))  # job_dispatch's run.sh does not export it; configs reference ${ML_REPO}
 WORKERS = int(os.environ.get("EVAL_WORKERS", "8"))
 REQUEST_TIMEOUT = 300
 
