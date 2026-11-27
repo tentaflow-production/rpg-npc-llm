@@ -1,0 +1,181 @@
+{
+  "npc": "Aurelia",
+  "scene": "rooftop",
+  "slot": "D3E",
+  "scenario_id": "canon_default",
+  "language": "zh",
+  "belief_bucket": "suspects_dorian",
+  "clue_ids_permitted": [
+    "t1"
+  ],
+  "withheld_topics": [
+    "你的志向",
+    "雇主的身份"
+  ],
+  "stance_set": [
+    "warm",
+    "probing",
+    "confiding"
+  ],
+  "history": [
+    {
+      "action": {
+        "type": "small_talk",
+        "topic": "话题1"
+      },
+      "line": "第1句回答。"
+    },
+    {
+      "action": {
+        "type": "small_talk",
+        "topic": "话题2"
+      },
+      "line": "第2句回答。"
+    },
+    {
+      "action": {
+        "type": "small_talk",
+        "topic": "话题3"
+      },
+      "line": "第3句回答。"
+    },
+    {
+      "action": {
+        "type": "small_talk",
+        "topic": "话题4"
+      },
+      "line": "第4句回答。"
+    },
+    {
+      "action": {
+        "type": "small_talk",
+        "topic": "话题5"
+      },
+      "line": "第5句回答。"
+    },
+    {
+      "action": {
+        "type": "small_talk",
+        "topic": "话题6"
+      },
+      "line": "第6句回答。"
+    },
+    {
+      "action": {
+        "type": "small_talk",
+        "topic": "话题7"
+      },
+      "line": "第7句回答。"
+    }
+  ],
+  "action": {
+    "type": "place_item",
+    "item": "两颗黑曜石"
+  },
+  "expected_messages": [
+    {
+      "role": "system",
+      "content": "你是 Aurelia，十九岁的天才炼金师，言语克制而骄傲，雇着一个不会说话的跑腿。\n【场景】Aurelia's Rooftop｜Day 3 晚上｜scenario_id: canon_default\n关于月之石被盗一事，我认为：我隐约觉得这件事和 Dorian 有关，但拿不出证据。\n[t1] Aurelia 一直关心岛外的政局，志向不止炼金。\n你会回避这些话题：你的志向；雇主的身份\n你可以选择的态度：warm | probing | confiding\n回复不超过两句话（讲故事除外）；用提示所用的语言（中文）回答；只谈当前时段内的事；除非你的看法如此，否则不要把玩家的沉默当作可疑。"
+    },
+    {
+      "role": "user",
+      "content": "（Jay 把话题转向：话题2）"
+    },
+    {
+      "role": "assistant",
+      "content": "第2句回答。"
+    },
+    {
+      "role": "user",
+      "content": "（Jay 把话题转向：话题3）"
+    },
+    {
+      "role": "assistant",
+      "content": "第3句回答。"
+    },
+    {
+      "role": "user",
+      "content": "（Jay 把话题转向：话题4）"
+    },
+    {
+      "role": "assistant",
+      "content": "第4句回答。"
+    },
+    {
+      "role": "user",
+      "content": "（Jay 把话题转向：话题5）"
+    },
+    {
+      "role": "assistant",
+      "content": "第5句回答。"
+    },
+    {
+      "role": "user",
+      "content": "（Jay 把话题转向：话题6）"
+    },
+    {
+      "role": "assistant",
+      "content": "第6句回答。"
+    },
+    {
+      "role": "user",
+      "content": "（Jay 把话题转向：话题7）"
+    },
+    {
+      "role": "assistant",
+      "content": "第7句回答。"
+    },
+    {
+      "role": "user",
+      "content": "（Jay 悄悄放下了两颗黑曜石。）"
+    }
+  ],
+  "valid_heads": [
+    {
+      "stance": "warm",
+      "reveal": [],
+      "line": "嗯，我想想。"
+    },
+    {
+      "stance": "confiding",
+      "reveal": [
+        "t1"
+      ],
+      "line": "这件事我只能说这么多。"
+    }
+  ],
+  "invalid_heads": [
+    {
+      "stance": "furious",
+      "reveal": [],
+      "line": "x"
+    },
+    {
+      "stance": "warm",
+      "reveal": [
+        "g9"
+      ],
+      "line": "x"
+    },
+    {
+      "stance": "warm",
+      "reveal": [],
+      "line": ""
+    },
+    {
+      "stance": "warm",
+      "reveal": "g1",
+      "line": "x"
+    },
+    {
+      "stance": "warm",
+      "line": "x"
+    },
+    {
+      "stance": "warm",
+      "reveal": [],
+      "line": "x",
+      "extra": 1
+    }
+  ]
+}

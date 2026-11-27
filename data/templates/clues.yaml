@@ -1,0 +1,21 @@
+# Clue nodes, canonical text (contract invariant 1/7). Ids = case bible 05 s7; the Chinese wording is [inferred].
+# A text here must NOT match any data/secrets.yaml pattern (tests check), otherwise a permitted clue would count as a leak.
+version: 1
+clues:
+  g1: "案发那天上午，Dorian 来过 Common Gems，还朝仓库那边晃了一圈。"
+  g2: "仓库后门的门闩被人用力撬坏了。"
+  g3: "小巷里躺着一枚灰色大衣上的纽扣。"
+  g4: "第二天下午，Dorian 整个下午都不在报社。"
+  g5: "Dorian 的灰色大衣少了一颗纽扣。"
+  g6: "第三天，Dorian 从报社资料室借走了《月之石考》。"
+  g7: "报社登出丢失的消息时，知道此事的只有 Bohan、Jay 和小偷。"
+  g8: "Dorian 在第五天晚上去炼金商店买了初月融水，这东西几乎没有别的用途。"
+  g9: "Dorian 办公桌里有一叠亲笔写的月之石笔记。"
+  p1t: "那些所谓 Aurelia 的笔记，日期比月之石出现早了好几年。"
+  p3t: "Aurelia 订阅的几乎都是讲花草鸟兽的月刊。"
+  p4t: "报道里写的取货日期是第五天，Bohan 的账本上写的是第六天。"
+  p4s: "那张工序记录出现在每天清晨都会被清空的垃圾箱里。"
+  t1: "Aurelia 一直关心岛外的政局，志向不止炼金。"
+  i1: "送报的男孩常把街上的见闻告诉 Dorian。"
+  i2: "报社的发行员总坐在酒馆门口的桌边吃晚饭。"
+  i3: "报社的工作人员会留意来访的客人。"

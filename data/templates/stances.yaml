@@ -1,0 +1,9 @@
+# Per-NPC stance sets (contract invariant 6). Source: contract text "Cecily has no `hostile`, Dorian has `charming | probing | cold`".
+# Everything else is [inferred]. A prompt's stance set must be a non-empty subset of the NPC's set here.
+version: 1
+stances:
+  Aurelia: [warm, evasive, probing, confiding, hostile]   # [inferred]
+  Bohan:   [warm, evasive, probing, confiding, hostile]   # [inferred]
+  Cecily:  [warm, evasive, probing, confiding]            # contract: no `hostile`
+  Dorian:  [charming, probing, cold]                      # contract
+  Elwin:   [warm, evasive, probing, cold, hostile]        # [inferred]

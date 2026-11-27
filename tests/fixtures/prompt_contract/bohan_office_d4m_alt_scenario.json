@@ -1,0 +1,117 @@
+{
+  "npc": "Bohan",
+  "scene": "backdoor_office",
+  "slot": "D4M",
+  "scenario_id": "alt_c3_one_scene_per_slot",
+  "language": "zh",
+  "belief_bucket": "heard_rumour",
+  "clue_ids_permitted": [
+    "g1",
+    "g2",
+    "g7"
+  ],
+  "withheld_topics": [
+    "你保管的东西",
+    "你对谁说过丢失的事"
+  ],
+  "stance_set": [
+    "warm",
+    "evasive",
+    "confiding"
+  ],
+  "history": [
+    {
+      "action": {
+        "type": "small_talk",
+        "topic": "话题1"
+      },
+      "line": "第1句回答。"
+    },
+    {
+      "action": {
+        "type": "small_talk",
+        "topic": "话题2"
+      },
+      "line": "第2句回答。"
+    }
+  ],
+  "action": {
+    "type": "listen"
+  },
+  "expected_messages": [
+    {
+      "role": "system",
+      "content": "你是 Bohan，Common Gems 的宝石商人，精明谨慎，说话爱绕弯子。\n【场景】Common Gems's backdoor office｜Day 4 早上｜scenario_id: alt_c3_one_scene_per_slot\n关于月之石被盗一事，我认为：我只在街上听到些传闻，说不准真假。\n[g1] 案发那天上午，Dorian 来过 Common Gems，还朝仓库那边晃了一圈。\n[g2] 仓库后门的门闩被人用力撬坏了。\n[g7] 报社登出丢失的消息时，知道此事的只有 Bohan、Jay 和小偷。\n你会回避这些话题：你保管的东西；你对谁说过丢失的事\n你可以选择的态度：warm | evasive | confiding\n回复不超过两句话（讲故事除外）；用提示所用的语言（中文）回答；只谈当前时段内的事；除非你的看法如此，否则不要把玩家的沉默当作可疑。"
+    },
+    {
+      "role": "user",
+      "content": "（Jay 把话题转向：话题1）"
+    },
+    {
+      "role": "assistant",
+      "content": "第1句回答。"
+    },
+    {
+      "role": "user",
+      "content": "（Jay 把话题转向：话题2）"
+    },
+    {
+      "role": "assistant",
+      "content": "第2句回答。"
+    },
+    {
+      "role": "user",
+      "content": "（Jay 在一旁倾听。）"
+    }
+  ],
+  "valid_heads": [
+    {
+      "stance": "warm",
+      "reveal": [],
+      "line": "嗯，我想想。"
+    },
+    {
+      "stance": "confiding",
+      "reveal": [
+        "g1",
+        "g2",
+        "g7"
+      ],
+      "line": "这件事我只能说这么多。"
+    }
+  ],
+  "invalid_heads": [
+    {
+      "stance": "furious",
+      "reveal": [],
+      "line": "x"
+    },
+    {
+      "stance": "warm",
+      "reveal": [
+        "g9"
+      ],
+      "line": "x"
+    },
+    {
+      "stance": "warm",
+      "reveal": [],
+      "line": ""
+    },
+    {
+      "stance": "warm",
+      "reveal": "g1",
+      "line": "x"
+    },
+    {
+      "stance": "warm",
+      "line": "x"
+    },
+    {
+      "stance": "warm",
+      "reveal": [],
+      "line": "x",
+      "extra": 1
+    }
+  ]
+}

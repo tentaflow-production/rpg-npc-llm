@@ -1,0 +1,10 @@
+# Belief buckets: the canonical text a belief line carries (contract invariant 2: never a bare label).
+# [inferred] wording, Chinese; the bucket ids are [inferred] too (case bible 05 s8 names the belief states only loosely).
+# No text here may match a data/secrets.yaml pattern (tests check).
+version: 1
+buckets:
+  unaware: "我对这件事一无所知。"
+  heard_rumour: "我只在街上听到些传闻，说不准真假。"
+  suspects_dorian: "我隐约觉得这件事和 Dorian 有关，但拿不出证据。"
+  suspects_aurelia: "我听说是 Aurelia 做的，虽然我不太相信。"
+  convinced_dorian: "我确信是 Dorian 干的。"

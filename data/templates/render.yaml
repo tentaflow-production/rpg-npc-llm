@@ -1,0 +1,38 @@
+# Rendering oracle for rpgnpc.prompt (docs/prompt_contract.md, Q18 envelope, Q19 language, D19 scenario_id).
+# Everything is [inferred] wording: the contract fixes the LAYOUT, not the exact strings. Frozen in build.
+version: 1
+languages: [zh]            # [inferred] Q36 default: zh only for dataset v2; `en` raises UnsupportedLanguage until en templates exist
+section_joiner: "\n"       # system message = non-empty sections joined by this, in the contract's order
+max_history_turns: 6       # [inferred] one turn = one (player action, NPC line) pair
+budget: {system_tokens: 600, total_tokens: 1024}   # contract invariant 5
+slot_labels:
+  zh: {M: 早上, A: 下午, E: 晚上}                  # contract: "早上|下午|晚上" (04: M/A/E)
+scene_names:               # 04 scene names (the only names canon has); [inferred] alley (case bible 05 s5, Q11 open)
+  cottage: "Jay's Cottage"
+  rooftop: "Aurelia's Rooftop"
+  task_center: "Errand-Runner Task Distribution Center"
+  street: "Commercial Street"
+  bistro: "Lunar's Bistro"
+  backdoor_office: "Common Gems's backdoor office"
+  newspaper_office: "Newspaper Office"
+  alchemy_stall: "Alchemy Stall"
+  alley: "Alley"
+zh:
+  scene_line: "【场景】{scene_name}｜Day {day} {slot_label}｜scenario_id: {scenario_id}"
+  belief_line: "关于月之石被盗一事，我认为：{belief_text}"
+  knowledge_line: "[{clue_id}] {text}"           # one per permitted clue id, in the order given; section omitted when none
+  withheld_line: "你会回避这些话题：{topics}"       # topics joined by "；"; section omitted when none
+  withheld_joiner: "；"
+  stance_line: "你可以选择的态度：{stances}"        # stances joined by " | "
+  stance_joiner: " | "
+  style_rules: "回复不超过两句话（讲故事除外）；用提示所用的语言（中文）回答；只谈当前时段内的事；除非你的看法如此，否则不要把玩家的沉默当作可疑。"
+# Player actions: the CLOSED set (invariant 3). Unknown type or missing argument -> ValueError.
+actions:
+  listen:     {zh: "（Jay 在一旁倾听。）", args: []}
+  silent:     {zh: "（Jay 保持沉默，等待。）", args: []}
+  small_talk: {zh: "（Jay 把话题转向：{topic}）", args: [topic]}
+  place_item: {zh: "（Jay 悄悄放下了{item}。）", args: [item]}
+  buy:        {zh: "（Jay 想买：{item}）", args: [item]}
+  deliver:    {zh: "（Jay 递上任务物品。）", args: []}
+envelope:
+  keys: [stance, reveal, line]       # Q18 option 2; serialised with json.dumps(ensure_ascii=False) and default separators

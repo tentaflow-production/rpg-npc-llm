@@ -1,0 +1,103 @@
+{
+  "npc": "Cecily",
+  "scene": "bistro",
+  "slot": "D2E",
+  "scenario_id": "canon_default",
+  "language": "zh",
+  "belief_bucket": "unaware",
+  "clue_ids_permitted": [
+    "g5"
+  ],
+  "withheld_topics": [
+    "你和报社的往来"
+  ],
+  "stance_set": [
+    "warm",
+    "evasive",
+    "probing"
+  ],
+  "history": [
+    {
+      "action": {
+        "type": "small_talk",
+        "topic": "今天的菜单"
+      },
+      "line": "今天有布丁，要来一份吗？"
+    }
+  ],
+  "action": {
+    "type": "small_talk",
+    "topic": "门口的那位先生"
+  },
+  "expected_messages": [
+    {
+      "role": "system",
+      "content": "你是 Cecily，Lunar's Bistro 的主厨兼店主，热情健谈，记得每位客人的样子。\n【场景】Lunar's Bistro｜Day 2 晚上｜scenario_id: canon_default\n关于月之石被盗一事，我认为：我对这件事一无所知。\n[g5] Dorian 的灰色大衣少了一颗纽扣。\n你会回避这些话题：你和报社的往来\n你可以选择的态度：warm | evasive | probing\n回复不超过两句话（讲故事除外）；用提示所用的语言（中文）回答；只谈当前时段内的事；除非你的看法如此，否则不要把玩家的沉默当作可疑。"
+    },
+    {
+      "role": "user",
+      "content": "（Jay 把话题转向：今天的菜单）"
+    },
+    {
+      "role": "assistant",
+      "content": "今天有布丁，要来一份吗？"
+    },
+    {
+      "role": "user",
+      "content": "（Jay 把话题转向：门口的那位先生）"
+    }
+  ],
+  "valid_heads": [
+    {
+      "stance": "warm",
+      "reveal": [],
+      "line": "嗯，我想想。"
+    },
+    {
+      "stance": "probing",
+      "reveal": [
+        "g5"
+      ],
+      "line": "这件事我只能说这么多。"
+    }
+  ],
+  "invalid_heads": [
+    {
+      "stance": "furious",
+      "reveal": [],
+      "line": "x"
+    },
+    {
+      "stance": "warm",
+      "reveal": [
+        "g9"
+      ],
+      "line": "x"
+    },
+    {
+      "stance": "warm",
+      "reveal": [],
+      "line": ""
+    },
+    {
+      "stance": "warm",
+      "reveal": "g1",
+      "line": "x"
+    },
+    {
+      "stance": "warm",
+      "line": "x"
+    },
+    {
+      "stance": "warm",
+      "reveal": [],
+      "line": "x",
+      "extra": 1
+    },
+    {
+      "stance": "hostile",
+      "reveal": [],
+      "line": "x"
+    }
+  ]
+}

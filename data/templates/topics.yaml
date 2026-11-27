@@ -1,0 +1,17 @@
+# Coverage vocabulary for stratification (Q20: >= 40 % of rows off-script). All [inferred]; the off-script KINDS come from Q20's answer
+# ("small talk, island daily life, prices and weather, questions about other NPCs, refusals, adversarial probes").
+version: 1
+player_input_types: [listen, silent, small_talk, place_item, buy, deliver]   # = actions in render.yaml (invariant 3)
+scripted_topics:           # tied to the canon scenes / the case
+  - case_theft
+  - case_frame
+  - task_handover
+  - newspaper_content
+  - scene_beat
+offscript_topics:          # a row is `offscript: true` iff its topic is in this list
+  - small_talk
+  - island_daily_life
+  - prices_and_weather
+  - other_npcs
+  - refusal
+  - adversarial_probe

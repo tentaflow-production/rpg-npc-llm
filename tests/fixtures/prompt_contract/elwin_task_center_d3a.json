@@ -1,0 +1,81 @@
+{
+  "npc": "Elwin",
+  "scene": "task_center",
+  "slot": "D3A",
+  "scenario_id": "canon_default",
+  "language": "zh",
+  "belief_bucket": "suspects_aurelia",
+  "clue_ids_permitted": [
+    "i1"
+  ],
+  "withheld_topics": [
+    "你和送报男孩"
+  ],
+  "stance_set": [
+    "warm",
+    "evasive",
+    "cold"
+  ],
+  "history": [],
+  "action": {
+    "type": "deliver"
+  },
+  "expected_messages": [
+    {
+      "role": "system",
+      "content": "你是 Elwin，跑腿任务分发中心的负责人，公事公办，什么都看在眼里。\n【场景】Errand-Runner Task Distribution Center｜Day 3 下午｜scenario_id: canon_default\n关于月之石被盗一事，我认为：我听说是 Aurelia 做的，虽然我不太相信。\n[i1] 送报的男孩常把街上的见闻告诉 Dorian。\n你会回避这些话题：你和送报男孩\n你可以选择的态度：warm | evasive | cold\n回复不超过两句话（讲故事除外）；用提示所用的语言（中文）回答；只谈当前时段内的事；除非你的看法如此，否则不要把玩家的沉默当作可疑。"
+    },
+    {
+      "role": "user",
+      "content": "（Jay 递上任务物品。）"
+    }
+  ],
+  "valid_heads": [
+    {
+      "stance": "warm",
+      "reveal": [],
+      "line": "嗯，我想想。"
+    },
+    {
+      "stance": "cold",
+      "reveal": [
+        "i1"
+      ],
+      "line": "这件事我只能说这么多。"
+    }
+  ],
+  "invalid_heads": [
+    {
+      "stance": "furious",
+      "reveal": [],
+      "line": "x"
+    },
+    {
+      "stance": "warm",
+      "reveal": [
+        "g9"
+      ],
+      "line": "x"
+    },
+    {
+      "stance": "warm",
+      "reveal": [],
+      "line": ""
+    },
+    {
+      "stance": "warm",
+      "reveal": "g1",
+      "line": "x"
+    },
+    {
+      "stance": "warm",
+      "line": "x"
+    },
+    {
+      "stance": "warm",
+      "reveal": [],
+      "line": "x",
+      "extra": 1
+    }
+  ]
+}
