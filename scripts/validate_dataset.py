@@ -25,7 +25,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from rpgnpc.prompt import validate_head  # noqa: E402
+from rpgnpc.prompt import validate_head
 
 MANIFEST_KEYS = ["version", "teacher_model", "teacher_sha", "template_sha", "seed", "decoding", "counts", "filter_policy",
                  "train_sha256"]
@@ -279,7 +279,7 @@ def validate(args: argparse.Namespace) -> dict[str, Any]:
         shared = grams(tpl.segments(r["messages"]), allow) & eval_grams
         if shared:
             hits += 1
-            viol.append({"code": "contamination", "id": r.get("id"), "example": sorted(shared)[0]})
+            viol.append({"code": "contamination", "id": r.get("id"), "example": min(shared)})
         if r.get("template_id") in eval_templates:
             viol.append({"code": "template_overlap", "id": r.get("id"), "template_id": r["template_id"]})
     metrics["contamination_hits"] = hits
