@@ -116,10 +116,10 @@ def build_scenes(canon_dir: str | Path) -> dict[str, Any]:
     tag("rooftop", "D2E", "Q3-C10")
     for s in ALL_SLOTS:                                       # Alley [inferred]: open and empty every slot
         slots.setdefault("alley", {})[s] = {"present": []}
-    for sid in slots:                                         # C6: Day-10 afternoon/evening are epilogue only
+    for per_scene in slots.values():                          # C6: Day-10 afternoon/evening are epilogue only
         for s in EPILOGUE_SLOTS:
-            if s in slots[sid]:
-                slots[sid][s]["epilogue_only"] = True
+            if s in per_scene:
+                per_scene[s]["epilogue_only"] = True
     tag("rooftop", "D10A", "Q3-C6")
 
     scenes: dict[str, Any] = {}
